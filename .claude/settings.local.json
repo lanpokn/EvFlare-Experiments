@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(python test:*)",
+      "Bash(chmod:*)",
+      "Bash(./setup_environment.sh:*)",
+      "Bash(python:*)",
+      "Bash(mv:*)"
     ],
     "deny": []
   }

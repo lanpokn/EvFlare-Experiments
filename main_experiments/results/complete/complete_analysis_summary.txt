@@ -1,0 +1,21 @@
+COMPLETE H5 PAIRS EVALUATION - FINAL ANALYSIS
+================================================================================
+
+Dataset: 50 paired H5 files
+Success rate: 100.0%
+Total successful evaluations: 50
+
+METRIC AVERAGES:
+----------------------------------------
+chamfer_distance: 4.776765 ± 3.225562
+gaussian_distance: 1.545530 ± 0.172965
+event_count_ratio: 0.514948 ± 0.261716
+temporal_overlap: 0.999852 ± 0.000022
+
+EVENT COUNT AVERAGES:
+  Flare events: 707,419
+  Ground truth events: 1,734,797
+
+PROCESSING PERFORMANCE:
+  Average time per pair: 14.26s
+  Total time: 713.24s (0.20h)

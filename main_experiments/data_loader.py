@@ -49,28 +49,60 @@ class Aedat4DataSource(DataSource):
     
     def _load_data(self) -> np.ndarray:
         """
-        Loads data from an .aedat4 file.
-        
-        TODO: Implement using dv-processing library or similar.
-        For now, this is a placeholder that needs actual implementation.
+        Loads data from an .aedat4 file using aedat library.
+        Based on the reference code provided by user.
         """
         print(f"Loading from AEDAT4: {self.file_path}")
         
-        # TODO: Actual implementation needed
-        # Example structure:
-        # import dv_processing as dv
-        # reader = dv.io.MonoCameraReader(self.file_path)
-        # events = []
-        # for packet in reader:
-        #     events.extend(packet.elements)
-        # 
-        # # Convert to structured array
-        # dtype = [('t', '<f8'), ('x', '<u2'), ('y', '<u2'), ('p', 'i1')]
-        # events_array = np.array([(e.timestamp(), e.x(), e.y(), e.polarity()) 
-        #                         for e in events], dtype=dtype)
-        # return events_array
+        try:
+            import aedat
+        except ImportError:
+            raise ImportError("aedat library not found. Please install with 'pip install aedat'")
         
-        raise NotImplementedError("AEDAT4 loading not yet implemented")
+        xs, ys, ts, ps = [], [], [], []
+        
+        # Read events from AEDAT4 file
+        decoder = aedat.Decoder(self.file_path)
+        for packet in decoder:
+            if 'events' in packet:
+                ev = packet['events']
+                xs.append(ev['x'])
+                ys.append(ev['y'])
+                ts.append(ev['t'])
+                ps.append(ev['p'])
+        
+        if not ts:
+            print(f"Warning: No events found in {self.file_path}")
+            # Return empty structured array with correct dtype
+            dtype = [('t', '<f8'), ('x', '<u2'), ('y', '<u2'), ('p', 'i1')]
+            return np.array([], dtype=dtype)
+        
+        # Flatten and convert arrays
+        ts_flat = np.concatenate(ts).astype(np.float64)
+        xs_flat = np.concatenate(xs).astype(np.uint16)  
+        ys_flat = np.concatenate(ys).astype(np.uint16)
+        ps_flat = np.concatenate(ps).astype(np.int8)
+        
+        # Convert timestamps from microseconds to seconds
+        ts_flat = ts_flat / 1e6
+        
+        # Align timestamps to start from 0
+        if len(ts_flat) > 0:
+            min_ts = ts_flat.min()
+            ts_flat = ts_flat - min_ts
+        
+        # Create structured array matching our standard format
+        dtype = [('t', '<f8'), ('x', '<u2'), ('y', '<u2'), ('p', 'i1')]
+        events_array = np.zeros(len(ts_flat), dtype=dtype)
+        events_array['t'] = ts_flat
+        events_array['x'] = xs_flat
+        events_array['y'] = ys_flat
+        events_array['p'] = ps_flat
+        
+        print(f"Loaded {len(events_array):,} events from AEDAT4 file")
+        print(f"Time range: {events_array['t'].min():.3f}s to {events_array['t'].max():.3f}s")
+        
+        return events_array
 
 
 class H5DataSource(DataSource):
@@ -78,28 +110,52 @@ class H5DataSource(DataSource):
     
     def _load_data(self) -> np.ndarray:
         """
-        Loads data from an HDF5 file.
-        
-        TODO: Implement using h5py library.
-        For now, this is a placeholder that needs actual implementation.
+        Loads data from an HDF5 file with format events/t, events/x, events/y, events/p.
+        Based on the user's H5 format specification.
         """
         print(f"Loading from H5: {self.file_path}")
         
-        # TODO: Actual implementation needed
-        # Example structure:
-        # import h5py
-        # with h5py.File(self.file_path, 'r') as f:
-        #     # Assume standard event dataset structure
-        #     t = f['events/t'][:]
-        #     x = f['events/x'][:]
-        #     y = f['events/y'][:]
-        #     p = f['events/p'][:]
-        # 
-        # dtype = [('t', '<f8'), ('x', '<u2'), ('y', '<u2'), ('p', 'i1')]
-        # events_array = np.array(list(zip(t, x, y, p)), dtype=dtype)
-        # return events_array
+        try:
+            import h5py
+        except ImportError:
+            raise ImportError("h5py library not found. Please install with 'pip install h5py'")
         
-        raise NotImplementedError("H5 loading not yet implemented")
+        try:
+            with h5py.File(self.file_path, 'r') as f:
+                # Read the four data arrays from events group
+                t = np.array(f['events']['t'])  # Timestamp (microseconds)
+                x = np.array(f['events']['x'])  # X coordinates  
+                y = np.array(f['events']['y'])  # Y coordinates
+                p = np.array(f['events']['p'])  # Polarity
+                
+                # Convert timestamps from microseconds to seconds
+                t = t.astype(np.float64) / 1e6
+                
+                # Align timestamps to start from 0
+                if len(t) > 0:
+                    min_ts = t.min()
+                    t = t - min_ts
+                
+                # Handle polarity: 1→+1, non-1→-1 (as per user specification)
+                p_processed = np.where(p == 1, 1, -1).astype(np.int8)
+                
+                # Create structured array matching our standard format
+                dtype = [('t', '<f8'), ('x', '<u2'), ('y', '<u2'), ('p', 'i1')]
+                events_array = np.zeros(len(t), dtype=dtype)
+                events_array['t'] = t
+                events_array['x'] = x.astype(np.uint16)
+                events_array['y'] = y.astype(np.uint16) 
+                events_array['p'] = p_processed
+                
+                print(f"Loaded {len(events_array):,} events from H5 file")
+                print(f"Time range: {events_array['t'].min():.3f}s to {events_array['t'].max():.3f}s")
+                print(f"Spatial range: X[{events_array['x'].min()}, {events_array['x'].max()}], Y[{events_array['y'].min()}, {events_array['y'].max()}]")
+                print(f"Polarity distribution: +1={np.sum(events_array['p'] == 1):,}, -1={np.sum(events_array['p'] == -1):,}")
+                
+                return events_array
+                
+        except Exception as e:
+            raise RuntimeError(f"Failed to load H5 file {self.file_path}: {e}")
 
 
 class NpyDataSource(DataSource):

@@ -1,0 +1,8 @@
+SIMULATED H5 EVENT PAIRS - EVALUATION SUMMARY
+================================================================================
+
+Total pairs evaluated: 50
+Successful evaluations: 50
+Failed evaluations: 0
+Success rate: 100.0%
+

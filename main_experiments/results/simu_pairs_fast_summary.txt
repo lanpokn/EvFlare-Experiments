@@ -1,0 +1,38 @@
+FAST EVALUATION SUMMARY
+==================================================
+
+Total pairs: 10
+Successful: 10
+Failed: 0
+Success rate: 100.0%
+
+METRIC STATISTICS:
+------------------------------
+
+chamfer_distance:
+  Mean:   4.389534
+  Std:    2.285250
+  Min:    2.077805
+  Max:    8.077387
+  Median: 3.325392
+
+gaussian_distance:
+  Mean:   1.549636
+  Std:    0.136052
+  Min:    1.378849
+  Max:    1.797827
+  Median: 1.496692
+
+event_count_ratio:
+  Mean:   0.537040
+  Std:    0.254410
+  Min:    0.225640
+  Max:    1.047832
+  Median: 0.477061
+
+temporal_overlap:
+  Mean:   0.999848
+  Std:    0.000021
+  Min:    0.999830
+  Max:    0.999900
+  Median: 0.999845
