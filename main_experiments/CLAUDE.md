@@ -125,13 +125,18 @@ deactivate
 - **依赖**: h5py 库
 
 ### 批量H5评估脚本 ✅
-- **文件**: `evaluate_simu_pairs_optimized.py`
-- **功能**: 批量评估成对H5文件的去炫光效果
+- **文件**: `evaluate_simu_pairs_optimized.py` (单方法版)
+- **文件**: `evaluate_all_methods.py` (多方法版)
+- **功能**: 批量评估H5文件的去炫光效果
+- **数据结构**: 
+  - **真值**: `background_with_light_events_test/` (包含 `*_bg_light.h5`)
+  - **各种方法**: 其他所有文件夹 (包含 `*_bg_flare.h5` 等各种方法的结果)
+  - **评估原则**: 计算各种方法相对于真值的指标，方法间不互相比较
 - **特点**:
   - 仅计算 chamfer_distance 和 gaussian_distance 
   - 结果统一保存到 `results/` 目录
   - 自动生成包含平均数行的CSV文件
-  - 自动配对：根据ID匹配 `*_bg_flare.h5` ↔ `*_bg_light.h5`
+  - 支持动态发现新增方法文件夹
 
 ### 测试脚本 ✅
 - **文件**: `test_aedat4_loading.py`
@@ -149,9 +154,11 @@ deactivate
 
 ## 使用示例
 
-### H5批量评估 (推荐使用)
+### H5批量评估
+
+#### 单方法评估
 ```bash
-# 评估全部50对H5文件
+# 评估单个方法的全部50对H5文件
 python evaluate_simu_pairs_optimized.py --output results
 
 # 评估指定数量的样本
@@ -159,6 +166,18 @@ python evaluate_simu_pairs_optimized.py --num-samples 10 --output results
 
 # 静默模式
 python evaluate_simu_pairs_optimized.py --quiet --output results
+```
+
+#### 多方法评估 (推荐使用)
+```bash
+# 评估所有方法相对于真值的指标
+python evaluate_all_methods.py --output results
+
+# 评估指定数量的样本
+python evaluate_all_methods.py --num-samples 10 --output results
+
+# 静默模式
+python evaluate_all_methods.py --quiet --output results
 ```
 
 ### 时间偏移分析
@@ -203,21 +222,26 @@ chmod +x setup_environment.sh
 ./setup_environment.sh
 ```
 
-**H5批量评估（推荐）**：
+**H5批量评估（推荐多方法版）**：
 ```bash
 cd /mnt/e/2025/event_flick_flare/experiments/main_experiments
 
-# 评估全部50对H5文件
+# 评估所有方法相对于真值 (推荐)
+python evaluate_all_methods.py --output results
+
+# 单个方法评估
 python evaluate_simu_pairs_optimized.py --output results
 
 # 快速测试少量样本
-python evaluate_simu_pairs_optimized.py --num-samples 5 --output results
+python evaluate_all_methods.py --num-samples 5 --output results
 ```
 
 **结果文件**：
-- **位置**: `results/h5_pairs_evaluation_results.csv`
-- **格式**: 包含平均数行的CSV，仅含论文所需的两个核心指标
-- **内容**: sample_id, chamfer_distance, gaussian_distance
+- **单方法版**: `results/h5_pairs_evaluation_results.csv`
+  - **格式**: sample_id, chamfer_distance, gaussian_distance
+- **多方法版**: `results/multi_method_evaluation_results.csv` (推荐)
+  - **格式**: sample_id, {method1}_chamfer_distance, {method1}_gaussian_distance, {method2}_chamfer_distance, {method2}_gaussian_distance, ...
+  - **特点**: 包含所有发现的方法，最后一行为AVERAGE，适合论文直接使用
 
 ## 项目优势
 - **完整性**: 支持真实 DVS 相机数据格式，已验证可用
