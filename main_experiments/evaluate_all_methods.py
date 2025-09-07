@@ -152,8 +152,8 @@ def evaluate_sample_across_methods(sample_id: str, file_matches: Dict[str, str],
                 
                 # Calculate metrics using the new metric system
                 if metric_names is None:
-                    # Default to the two main metrics for backward compatibility
-                    selected_metrics = ['chamfer_distance', 'gaussian_distance']
+                    # Default to comprehensive metric set: traditional + voxel
+                    selected_metrics = ['chamfer_distance', 'gaussian_distance', 'pmse_2', 'pmse_4', 'rf1', 'tf1', 'tpf1']
                 else:
                     selected_metrics = metric_names
                 
@@ -174,7 +174,7 @@ def evaluate_sample_across_methods(sample_id: str, file_matches: Dict[str, str],
                     print(f"    {method_name}: Failed - {e}")
                 # Set failed metrics to NaN
                 if metric_names is None:
-                    selected_metrics = ['chamfer_distance', 'gaussian_distance']
+                    selected_metrics = ['chamfer_distance', 'gaussian_distance', 'pmse_2', 'pmse_4', 'rf1', 'tf1', 'tpf1']
                 else:
                     selected_metrics = metric_names
                 for metric_name in selected_metrics:
@@ -199,7 +199,7 @@ def run_multi_method_evaluation(simu_dir: str = "Datasets/simu",
         if metric_names:
             print(f"Selected metrics: {', '.join(metric_names)}")
         else:
-            print("Using default metrics: chamfer_distance, gaussian_distance")
+            print("Using default metrics: chamfer_distance, gaussian_distance, pmse_2, pmse_4, rf1, tf1, tpf1")
             print(f"Available metrics: {', '.join(get_available_metrics().keys())}")
     
     # Discover methods and ground truth

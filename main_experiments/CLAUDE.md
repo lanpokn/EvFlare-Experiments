@@ -283,20 +283,29 @@ python test_aedat4_loading.py
 
 #### **🎯 推荐指标组合**
 ```bash
-# 论文标准组合：传统+voxel核心指标
-python evaluate_all_methods.py --metrics chamfer_distance tf1 tpf1 pmse_2
+# 🌟 默认组合：传统+voxel完整指标（现已设为默认）
+python evaluate_all_methods.py --output results
+
+# 纯voxel组合：现代评估方法
+python evaluate_all_methods.py --metrics pmse_2 pmse_4 rf1 tf1 tpf1
 
 # 全面对比组合：覆盖所有评估维度  
 python evaluate_all_methods.py --metrics chamfer_distance gaussian_distance tf1 tpf1 pmse_2 temporal_overlap
 
-# 纯voxel组合：现代voxel评估方法
-python evaluate_all_methods.py --metrics tf1 tpf1 rf1 pmse_2 pmse_4
+# 传统指标组合：兼容旧版本
+python evaluate_all_methods.py --metrics chamfer_distance gaussian_distance
 ```
 
 #### **📊 指标优劣性总结**
 - **📈 越高越好**: tf1, tpf1, rf1, temporal_overlap
 - **📉 越低越好**: chamfer_distance, gaussian_distance, pmse_2, pmse_4  
 - **📊 比例指标**: event_count_ratio (理想值≈1.0)
+
+#### **⚠️ 距离指标优化** ✅
+- **Chamfer/Gaussian距离重大改进**：从双向计算改为**单向计算**（估计→真值）
+- **核心逻辑**：只计算estimated events到ground truth的距离，不反向计算
+- **去炫光优化**：避免因移除炫光事件而被错误惩罚，更公平评估去炫光效果
+- **实现验证**：✅ 参数顺序正确，estimated events查询ground truth树
 
 ### **环境准备（首次使用）**
 ```bash
@@ -312,14 +321,17 @@ source ~/miniconda3/bin/activate && conda activate Umain
 ```bash
 cd /mnt/e/2025/event_flick_flare/experiments/main_experiments
 
-# 查看所有可用指标
+# 查看所有可用指标  
 python evaluate_all_methods.py --list-metrics
 
-# 使用推荐指标组合评估
+# 🌟 使用新默认混合指标：传统+voxel（推荐）
+python evaluate_all_methods.py --output results
+
+# 使用混合指标组合评估
 python evaluate_all_methods.py --metrics chamfer_distance tf1 tpf1 pmse_2 --output results
 
 # 快速测试少量样本
-python evaluate_all_methods.py --num-samples 5 --metrics tf1 tpf1 --output results
+python evaluate_all_methods.py --num-samples 5 --output results
 ```
 
 ### **结果文件**
@@ -362,9 +374,9 @@ python evaluate_all_methods.py --metrics chamfer_distance my_voxel_metric
 ### 完整指标体系 ✅
 **总计9个指标，5个类别**
 
-#### **距离类指标 (Lower is Better)**
-- **`chamfer_distance`**: Chamfer距离，基于KDTree最近邻，衡量事件流空间分布差异
-- **`gaussian_distance`**: 高斯加权距离，sigma=0.4，对距离进行高斯核加权后的相似度
+#### **距离类指标 (Lower is Better)** 
+- **`chamfer_distance`**: **单向Chamfer距离**，只计算estimated→ground truth的KDTree最近邻距离，避免惩罚炫光移除
+- **`gaussian_distance`**: **单向高斯加权距离**，sigma=0.4，只计算estimated→ground truth方向，专门优化去炫光任务评估
 
 #### **计数类指标 (Ratio)**  
 - **`event_count_ratio`**: 事件计数比例，估计数/真值数，理想值为1.0

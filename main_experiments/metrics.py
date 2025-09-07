@@ -48,7 +48,7 @@ def normalize_evs(evs: np.ndarray) -> np.ndarray:
     evs_normalized['x'] = ((evs['x'] - evs['x'].min()) * 100 / (evs['x'].max() - evs['x'].min() + epsilon)).astype(float)
     evs_normalized['y'] = ((evs['y'] - evs['y'].min()) * 100 / (evs['y'].max() - evs['y'].min() + epsilon)).astype(float)
     evs_normalized['p'] = ((evs['p'] - evs['p'].min()) * 100 / (evs['p'].max() - evs['p'].min() + epsilon)).astype(float)
-    evs_normalized['t'] = ((evs['t'] - evs['t'].min()) * 1 / (evs['t'].max() - evs['t'].min() + epsilon)).astype(float)
+    evs_normalized['t'] = ((evs['t'] - evs['t'].min()) * 100 / (evs['t'].max() - evs['t'].min() + epsilon)).astype(float)
     
     return evs_normalized
 
@@ -81,16 +81,15 @@ def chamfer_distance_loss(evs1: np.ndarray, evs2: np.ndarray) -> float:
     evs2_float[:, 2] = evs2_norm['p']
     evs2_float[:, 3] = evs2_norm['t']
     
-    # Create KDTree using evs2_float as points
-    tree1 = KDTree(evs1_float)
-    tree2 = KDTree(evs2_float)
+    # Create KDTree using ground truth (evs2) as reference points
+    tree_gt = KDTree(evs2_float)
 
-    # Query the tree with evs1_float as points
-    dists1, _ = tree2.query(evs1_float)
-    dists2, _ = tree1.query(evs2_float)
+    # Only query estimated events (evs1) against ground truth tree
+    # This avoids penalizing removal of flare events without adding background
+    dists_est_to_gt, _ = tree_gt.query(evs1_float)
 
-    # Return the mean of distances
-    return (np.mean(dists1) + np.mean(dists2))
+    # Return mean distance from estimated events to nearest ground truth events
+    return np.mean(dists_est_to_gt)
 
 
 def gaussian_distance_loss(evs1: np.ndarray, evs2: np.ndarray, sigma: float = 0.4) -> float:
@@ -122,19 +121,16 @@ def gaussian_distance_loss(evs1: np.ndarray, evs2: np.ndarray, sigma: float = 0.
     evs2_float[:, 2] = evs2_norm['p']
     evs2_float[:, 3] = evs2_norm['t']
     
-    # Create KDTree using evs2_float as points
-    tree1 = KDTree(evs1_float)
-    tree2 = KDTree(evs2_float)
+    # Create KDTree using ground truth (evs2) as reference points
+    tree_gt = KDTree(evs2_float)
 
-    # Query the tree with evs1_float as points
-    dists1, _ = tree2.query(evs1_float)
-    dists1 = 1 - np.exp(-dists1 * dists1 / sigma)
+    # Only query estimated events (evs1) against ground truth tree
+    # This avoids penalizing removal of flare events without adding background
+    dists_est_to_gt, _ = tree_gt.query(evs1_float)
+    dists_gaussian = 1 - np.exp(-dists_est_to_gt * dists_est_to_gt / sigma)
 
-    dists2, _ = tree1.query(evs2_float)
-    dists2 = 1 - np.exp(-dists2 * dists2 / sigma)
-
-    # Return the mean of distances
-    return (np.mean(dists1) + np.mean(dists2))
+    # Return mean Gaussian-weighted distance from estimated events to ground truth
+    return np.mean(dists_gaussian)
 
 
 def calculate_event_count_ratio(evs1: np.ndarray, evs2: np.ndarray) -> float:
