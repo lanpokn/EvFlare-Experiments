@@ -4,7 +4,10 @@
       "Bash(python:*)",
       "Bash(ls:*)",
       "Bash(mkdir:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(pip install:*)",
+      "Bash(conda activate:*)",
+      "Bash(source:*)"
     ],
     "deny": []
   }

@@ -16,7 +16,7 @@ import numpy as np
 
 from data_loader import load_events
 from methods import MethodResult
-from metrics import calculate_all_metrics
+from metrics import calculate_all_metrics, calculate_metrics
 
 
 class MainExperimentEvaluator:
@@ -32,16 +32,19 @@ class MainExperimentEvaluator:
     This framework only evaluates pre-processed results.
     """
     
-    def __init__(self, method_results: List[MethodResult], verbose: bool = True):
+    def __init__(self, method_results: List[MethodResult], verbose: bool = True, 
+                 metric_names: Optional[List[str]] = None):
         """
         Initialize the evaluator with a list of method results to evaluate.
         
         Args:
             method_results (List[MethodResult]): List of method results to evaluate
             verbose (bool): Whether to print detailed progress information
+            metric_names (List[str], optional): Specific metrics to calculate. If None, uses all.
         """
         self.method_results = method_results
         self.verbose = verbose
+        self.metric_names = metric_names
         self.results = []
         self.failed_evaluations = []
         
@@ -49,6 +52,10 @@ class MainExperimentEvaluator:
             print(f"Initialized evaluator with {len(method_results)} method results:")
             for result in method_results:
                 print(f"  - {result.name}")
+            if metric_names:
+                print(f"Selected metrics: {', '.join(metric_names)}")
+            else:
+                print("Using all available metrics")
 
     def run_single_evaluation(self, 
                             gt_file_path: str, 
@@ -119,7 +126,10 @@ class MainExperimentEvaluator:
                 if self.verbose:
                     print(f"  Computing metrics...")
                 metrics_start = time.time()
-                metrics = calculate_all_metrics(events_est, events_gt)
+                if self.metric_names:
+                    metrics = calculate_metrics(events_est, events_gt, self.metric_names)
+                else:
+                    metrics = calculate_all_metrics(events_est, events_gt)
                 metrics_time = time.time() - metrics_start
                 
                 method_total_time = time.time() - method_start_time

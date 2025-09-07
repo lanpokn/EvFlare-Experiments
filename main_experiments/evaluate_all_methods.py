@@ -29,7 +29,7 @@ import pandas as pd
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from data_loader import load_events
-from metrics import chamfer_distance_loss, gaussian_distance_loss
+from metrics import calculate_metrics, get_available_metrics
 
 
 def discover_methods_and_gt(simu_dir: str) -> Tuple[str, List[str]]:
@@ -115,9 +115,16 @@ def find_matching_files(sample_id: str, gt_folder: str, method_folders: List[str
     return matches
 
 
-def evaluate_sample_across_methods(sample_id: str, file_matches: Dict[str, str], verbose: bool = False) -> Dict:
+def evaluate_sample_across_methods(sample_id: str, file_matches: Dict[str, str], 
+                                  metric_names: List[str] = None, verbose: bool = False) -> Dict:
     """
     Evaluate one sample across all methods against ground truth.
+    
+    Args:
+        sample_id (str): Sample identifier
+        file_matches (Dict[str, str]): Mapping of method names to file paths
+        metric_names (List[str], optional): Specific metrics to calculate
+        verbose (bool): Print detailed progress
     
     Returns:
         Dict with results for each method
@@ -143,21 +150,35 @@ def evaluate_sample_across_methods(sample_id: str, file_matches: Dict[str, str],
                 # Load method results
                 method_events = load_events(method_file)
                 
-                # Calculate metrics
-                chamfer_dist = chamfer_distance_loss(method_events, gt_events)
-                gaussian_dist = gaussian_distance_loss(method_events, gt_events)
+                # Calculate metrics using the new metric system
+                if metric_names is None:
+                    # Default to the two main metrics for backward compatibility
+                    selected_metrics = ['chamfer_distance', 'gaussian_distance']
+                else:
+                    selected_metrics = metric_names
                 
-                results[f'{method_name}_chamfer_distance'] = chamfer_dist
-                results[f'{method_name}_gaussian_distance'] = gaussian_dist
+                method_metrics = calculate_metrics(method_events, gt_events, selected_metrics)
+                
+                # Add method prefix to metric names for final results
+                for metric_name, value in method_metrics.items():
+                    if not metric_name.endswith('_count'):  # Skip count metrics for method prefixing
+                        results[f'{method_name}_{metric_name}'] = value
                 
                 if verbose:
-                    print(f"    {method_name}: CD={chamfer_dist:.4f}, GD={gaussian_dist:.4f}")
+                    metric_str = ', '.join([f"{k}={v:.4f}" for k, v in method_metrics.items() 
+                                          if not k.endswith('_count')])
+                    print(f"    {method_name}: {metric_str}")
                     
             except Exception as e:
                 if verbose:
                     print(f"    {method_name}: Failed - {e}")
-                results[f'{method_name}_chamfer_distance'] = np.nan
-                results[f'{method_name}_gaussian_distance'] = np.nan
+                # Set failed metrics to NaN
+                if metric_names is None:
+                    selected_metrics = ['chamfer_distance', 'gaussian_distance']
+                else:
+                    selected_metrics = metric_names
+                for metric_name in selected_metrics:
+                    results[f'{method_name}_{metric_name}'] = np.nan
         
         return results
         
@@ -167,6 +188,7 @@ def evaluate_sample_across_methods(sample_id: str, file_matches: Dict[str, str],
 
 def run_multi_method_evaluation(simu_dir: str = "Datasets/simu", 
                                max_samples: int = None, 
+                               metric_names: List[str] = None,
                                verbose: bool = True) -> pd.DataFrame:
     """Run evaluation across all methods."""
     
@@ -174,6 +196,11 @@ def run_multi_method_evaluation(simu_dir: str = "Datasets/simu",
         print("="*80)
         print("MULTI-METHOD H5 EVENT EVALUATION")
         print("="*80)
+        if metric_names:
+            print(f"Selected metrics: {', '.join(metric_names)}")
+        else:
+            print("Using default metrics: chamfer_distance, gaussian_distance")
+            print(f"Available metrics: {', '.join(get_available_metrics().keys())}")
     
     # Discover methods and ground truth
     gt_folder, method_folders = discover_methods_and_gt(simu_dir)
@@ -213,7 +240,7 @@ def run_multi_method_evaluation(simu_dir: str = "Datasets/simu",
             print(f"    Found files: {len(file_matches)-1} methods + GT")
         
         # Evaluate this sample
-        sample_result = evaluate_sample_across_methods(sample_id, file_matches, verbose)
+        sample_result = evaluate_sample_across_methods(sample_id, file_matches, metric_names, verbose)
         results.append(sample_result)
     
     total_time = time.time() - start_time
@@ -223,11 +250,12 @@ def run_multi_method_evaluation(simu_dir: str = "Datasets/simu",
     
     # Calculate averages for each method
     method_columns = []
+    used_metrics = metric_names if metric_names else ['chamfer_distance', 'gaussian_distance']
     for method_name in method_names:
-        chamfer_col = f'{method_name}_chamfer_distance'
-        gaussian_col = f'{method_name}_gaussian_distance'
-        if chamfer_col in df.columns:
-            method_columns.extend([chamfer_col, gaussian_col])
+        for metric_name in used_metrics:
+            col_name = f'{method_name}_{metric_name}'
+            if col_name in df.columns:
+                method_columns.append(col_name)
     
     # Add averages row
     averages = {'sample_id': 'AVERAGE'}
@@ -256,16 +284,13 @@ def run_multi_method_evaluation(simu_dir: str = "Datasets/simu",
             print("AVERAGE METRICS BY METHOD:")
             print("-" * 50)
             for method_name in method_names:
-                chamfer_col = f'{method_name}_chamfer_distance'
-                gaussian_col = f'{method_name}_gaussian_distance'
-                
-                if chamfer_col in df.columns and gaussian_col in df.columns:
-                    chamfer_avg = df[chamfer_col].mean(skipna=True)
-                    gaussian_avg = df[gaussian_col].mean(skipna=True)
-                    print(f"{method_name}:")
-                    print(f"  Chamfer Distance: {chamfer_avg:.6f}")
-                    print(f"  Gaussian Distance: {gaussian_avg:.6f}")
-                    print()
+                print(f"{method_name}:")
+                for metric_name in used_metrics:
+                    col_name = f'{method_name}_{metric_name}'
+                    if col_name in df.columns:
+                        avg_value = df[col_name].mean(skipna=True)
+                        print(f"  {metric_name.replace('_', ' ').title()}: {avg_value:.6f}")
+                print()
     
     return df_with_avg
 
@@ -287,26 +312,41 @@ def save_results(df: pd.DataFrame, output_dir: str = "results", verbose: bool = 
         print("\nFINAL AVERAGES SUMMARY:")
         print("="*50)
         
-        # Group by method
+        # Group by method and extract all metrics
         method_metrics = {}
         for col in df.columns:
-            if col.endswith('_chamfer_distance'):
-                method_name = col[:-len('_chamfer_distance')]
-                if method_name not in method_metrics:
-                    method_metrics[method_name] = {}
-                method_metrics[method_name]['chamfer'] = avg_row[col]
-            elif col.endswith('_gaussian_distance'):
-                method_name = col[:-len('_gaussian_distance')]
-                if method_name not in method_metrics:
-                    method_metrics[method_name] = {}
-                method_metrics[method_name]['gaussian'] = avg_row[col]
+            if col != 'sample_id' and not col.endswith('_count'):
+                # Parse method name and metric name from column
+                # Find the last underscore to separate method from metric
+                if '_' in col:
+                    parts = col.rsplit('_', 1)  # Split from right, max 1 split
+                    if len(parts) == 2:
+                        potential_method = parts[0]
+                        metric_name = parts[1]
+                        
+                        # Check if this looks like a metric name
+                        if metric_name in ['chamfer', 'gaussian', 'distance', 'overlap', 'ratio']:
+                            # Handle compound metric names like 'chamfer_distance'
+                            underscore_parts = col.split('_')
+                            if len(underscore_parts) >= 3:  # method_metric_type format
+                                method_name = '_'.join(underscore_parts[:-2]) if len(underscore_parts) > 3 else underscore_parts[0]
+                                metric_full_name = '_'.join(underscore_parts[-2:])
+                            else:
+                                method_name = potential_method
+                                metric_full_name = metric_name
+                        else:
+                            # Fallback: assume everything except last part is method name
+                            method_name = potential_method
+                            metric_full_name = metric_name
+                        
+                        if method_name not in method_metrics:
+                            method_metrics[method_name] = {}
+                        method_metrics[method_name][metric_full_name] = avg_row[col]
         
         for method_name, metrics in method_metrics.items():
             print(f"{method_name}:")
-            if 'chamfer' in metrics:
-                print(f"  Chamfer Distance: {metrics['chamfer']:.6f}")
-            if 'gaussian' in metrics:
-                print(f"  Gaussian Distance: {metrics['gaussian']:.6f}")
+            for metric_name, value in metrics.items():
+                print(f"  {metric_name.replace('_', ' ').title()}: {value:.6f}")
             print()
 
 
@@ -324,15 +364,30 @@ def main():
     parser.add_argument('--num-samples', '-n', type=int,
                        help='Limit number of samples (default: all)')
     
+    parser.add_argument('--metrics', '-m', nargs='+',
+                       help='Specific metrics to calculate (e.g., --metrics chamfer_distance gaussian_distance)')
+    
+    parser.add_argument('--list-metrics', action='store_true',
+                       help='List all available metrics and exit')
+    
     parser.add_argument('--quiet', '-q', action='store_true',
                        help='Reduce verbosity')
     
     args = parser.parse_args()
     
     try:
+        # Handle --list-metrics
+        if args.list_metrics:
+            available_metrics = get_available_metrics()
+            print("Available metrics:")
+            for name, info in available_metrics.items():
+                print(f"  {name}: {info['description']} (category: {info['category']})")
+            return
+        
         results_df = run_multi_method_evaluation(
             simu_dir=args.simu_dir,
             max_samples=args.num_samples,
+            metric_names=args.metrics,
             verbose=not args.quiet
         )
         
