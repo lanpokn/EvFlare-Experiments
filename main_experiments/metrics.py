@@ -26,7 +26,7 @@ def normalize_evs(evs: np.ndarray) -> np.ndarray:
     evs_normalized['x'] = ((evs['x'] - evs['x'].min()) * 100 / (evs['x'].max() - evs['x'].min() + epsilon)).astype(float)
     evs_normalized['y'] = ((evs['y'] - evs['y'].min()) * 100 / (evs['y'].max() - evs['y'].min() + epsilon)).astype(float)
     evs_normalized['p'] = ((evs['p'] - evs['p'].min()) * 100 / (evs['p'].max() - evs['p'].min() + epsilon)).astype(float)
-    evs_normalized['t'] = ((evs['t'] - evs['t'].min()) * 1000 / (evs['t'].max() - evs['t'].min() + epsilon)).astype(float)
+    evs_normalized['t'] = ((evs['t'] - evs['t'].min()) * 0.0001 / (evs['t'].max() - evs['t'].min() + epsilon)).astype(float)
     
     return evs_normalized
 
