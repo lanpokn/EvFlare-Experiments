@@ -176,6 +176,36 @@ def calculate_temporal_coverage_overlap(evs1: np.ndarray, evs2: np.ndarray) -> f
     return overlap_duration / total_duration if total_duration > 0 else 0.0
 
 
+def calculate_pger(evs_pred: np.ndarray, evs_gt: np.ndarray) -> float:
+    """
+    Calculate PGER (Predicted/Ground Truth Event Number Ratio).
+    
+    This is a simple but important "sanity check". A good decoder should generate 
+    roughly the same number of events as the ground truth.
+    
+    Args:
+        evs_pred (np.ndarray): Predicted/estimated event stream
+        evs_gt (np.ndarray): Ground truth event stream
+        
+    Returns:
+        float: PGER value. Closer to 1.0 is better.
+               >1.0: over-sampling/noise generation
+               <1.0: under-sampling/information loss
+               
+    Note:
+        - PGER = 1.0 indicates perfect event count matching
+        - This metric is ratio-based, not distance-based
+    """
+    num_pred = len(evs_pred)
+    num_gt = len(evs_gt)
+    
+    # Handle edge case where ground truth is empty
+    if num_gt == 0:
+        return np.inf if num_pred > 0 else 0.0
+    
+    return num_pred / num_gt
+
+
 # Metric Registry System
 _METRIC_REGISTRY = {}
 
@@ -491,6 +521,13 @@ register_metric(
     calculate_temporal_coverage_overlap,
     'Temporal coverage overlap ratio between event streams', 
     'temporal'
+)
+
+register_metric(
+    'pger',
+    calculate_pger,
+    'PGER (Predicted/Ground Truth Event Number Ratio) - sanity check for event count matching',
+    'count'
 )
 
 # Register voxel-based metrics (conditional on dependencies)

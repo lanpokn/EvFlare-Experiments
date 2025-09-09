@@ -7,7 +7,11 @@
       "Bash(rm:*)",
       "Bash(pip install:*)",
       "Bash(conda activate:*)",
-      "Bash(source:*)"
+      "Bash(source:*)",
+      "Bash(--clean_file \"/mnt/e/2025/event_flick_flare/datasets/DAVIS/test/redlightandfull_noFlare-2025_06_25_15_23_32.aedat4\" )",
+      "Bash(--flare_file \"/mnt/e/2025/event_flick_flare/datasets/DAVIS/test/redlightandfull_sixFlare-2025_06_25_15_24_11.aedat4\" )",
+      "Bash(--num_samples 10 )",
+      "Bash(--duration 0.1)"
     ],
     "deny": []
   }

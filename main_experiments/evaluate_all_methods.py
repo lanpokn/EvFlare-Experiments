@@ -152,8 +152,8 @@ def evaluate_sample_across_methods(sample_id: str, file_matches: Dict[str, str],
                 
                 # Calculate metrics using the new metric system
                 if metric_names is None:
-                    # Default to comprehensive metric set: traditional + voxel
-                    selected_metrics = ['chamfer_distance', 'gaussian_distance', 'pmse_2', 'pmse_4', 'rf1', 'tf1', 'tpf1']
+                    # Default to comprehensive metric set: traditional + voxel + sanity checks
+                    selected_metrics = ['chamfer_distance', 'gaussian_distance', 'pger', 'pmse_2', 'pmse_4', 'rf1', 'tf1', 'tpf1']
                 else:
                     selected_metrics = metric_names
                 
@@ -174,7 +174,7 @@ def evaluate_sample_across_methods(sample_id: str, file_matches: Dict[str, str],
                     print(f"    {method_name}: Failed - {e}")
                 # Set failed metrics to NaN
                 if metric_names is None:
-                    selected_metrics = ['chamfer_distance', 'gaussian_distance', 'pmse_2', 'pmse_4', 'rf1', 'tf1', 'tpf1']
+                    selected_metrics = ['chamfer_distance', 'gaussian_distance', 'pger', 'pmse_2', 'pmse_4', 'rf1', 'tf1', 'tpf1']
                 else:
                     selected_metrics = metric_names
                 for metric_name in selected_metrics:
@@ -199,7 +199,7 @@ def run_multi_method_evaluation(simu_dir: str = "Datasets/simu",
         if metric_names:
             print(f"Selected metrics: {', '.join(metric_names)}")
         else:
-            print("Using default metrics: chamfer_distance, gaussian_distance, pmse_2, pmse_4, rf1, tf1, tpf1")
+            print("Using default metrics: chamfer_distance, gaussian_distance, pger, pmse_2, pmse_4, rf1, tf1, tpf1")
             print(f"Available metrics: {', '.join(get_available_metrics().keys())}")
     
     # Discover methods and ground truth
@@ -248,14 +248,12 @@ def run_multi_method_evaluation(simu_dir: str = "Datasets/simu",
     # Convert to DataFrame
     df = pd.DataFrame(results)
     
-    # Calculate averages for each method
+    # Calculate averages for each method - use ALL columns, not just selected metrics
     method_columns = []
-    used_metrics = metric_names if metric_names else ['chamfer_distance', 'gaussian_distance']
-    for method_name in method_names:
-        for metric_name in used_metrics:
-            col_name = f'{method_name}_{metric_name}'
-            if col_name in df.columns:
-                method_columns.append(col_name)
+    # Get all metric columns (exclude sample_id and any error columns)
+    for col in df.columns:
+        if col != 'sample_id' and not col.endswith('_error') and not col.endswith('_count'):
+            method_columns.append(col)
     
     # Add averages row
     averages = {'sample_id': 'AVERAGE'}
@@ -285,11 +283,12 @@ def run_multi_method_evaluation(simu_dir: str = "Datasets/simu",
             print("-" * 50)
             for method_name in method_names:
                 print(f"{method_name}:")
-                for metric_name in used_metrics:
-                    col_name = f'{method_name}_{metric_name}'
-                    if col_name in df.columns:
-                        avg_value = df[col_name].mean(skipna=True)
-                        print(f"  {metric_name.replace('_', ' ').title()}: {avg_value:.6f}")
+                # Find all metrics for this method
+                method_cols = [col for col in df.columns if col.startswith(method_name + '_')]
+                for col in sorted(method_cols):
+                    metric_name = col[len(method_name + '_'):]
+                    avg_value = df[col].mean(skipna=True)
+                    print(f"  {metric_name.replace('_', ' ').title()}: {avg_value:.6f}")
                 print()
     
     return df_with_avg
@@ -317,28 +316,31 @@ def save_results(df: pd.DataFrame, output_dir: str = "results", verbose: bool = 
         for col in df.columns:
             if col != 'sample_id' and not col.endswith('_count'):
                 # Parse method name and metric name from column
-                # Find the last underscore to separate method from metric
+                # Handle different metric naming patterns
                 if '_' in col:
-                    parts = col.rsplit('_', 1)  # Split from right, max 1 split
-                    if len(parts) == 2:
-                        potential_method = parts[0]
-                        metric_name = parts[1]
-                        
-                        # Check if this looks like a metric name
-                        if metric_name in ['chamfer', 'gaussian', 'distance', 'overlap', 'ratio']:
-                            # Handle compound metric names like 'chamfer_distance'
-                            underscore_parts = col.split('_')
-                            if len(underscore_parts) >= 3:  # method_metric_type format
-                                method_name = '_'.join(underscore_parts[:-2]) if len(underscore_parts) > 3 else underscore_parts[0]
-                                metric_full_name = '_'.join(underscore_parts[-2:])
-                            else:
-                                method_name = potential_method
-                                metric_full_name = metric_name
-                        else:
-                            # Fallback: assume everything except last part is method name
-                            method_name = potential_method
-                            metric_full_name = metric_name
-                        
+                    # Known metric patterns for proper parsing
+                    known_metrics = ['chamfer_distance', 'gaussian_distance', 'temporal_overlap', 
+                                   'event_count_ratio', 'pger', 'pmse_2', 'pmse_4', 
+                                   'rf1', 'tf1', 'tpf1']
+                    
+                    method_name = None
+                    metric_full_name = None
+                    
+                    # Try to match known metric patterns
+                    for metric in known_metrics:
+                        if col.endswith('_' + metric):
+                            method_name = col[:-len('_' + metric)]
+                            metric_full_name = metric
+                            break
+                    
+                    # Fallback: split from the right
+                    if method_name is None:
+                        parts = col.rsplit('_', 1)
+                        if len(parts) == 2:
+                            method_name = parts[0]
+                            metric_full_name = parts[1]
+                    
+                    if method_name and metric_full_name:
                         if method_name not in method_metrics:
                             method_metrics[method_name] = {}
                         method_metrics[method_name][metric_full_name] = avg_row[col]
