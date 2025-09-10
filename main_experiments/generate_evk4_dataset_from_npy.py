@@ -14,7 +14,7 @@ import numpy as np
 import h5py
 from pathlib import Path
 import random
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional
 
 def read_evk4_npy_events(npy_folder: str) -> Dict[str, np.ndarray]:
     """
@@ -83,6 +83,81 @@ def find_time_overlap(events1: Dict, events2: Dict) -> Tuple[float, float]:
     
     return overlap_start, overlap_end
 
+def shift_timestamps(events: Dict, offset: float) -> Dict:
+    """
+    对事件时间戳进行偏移（参考已有代码）
+    """
+    events_shifted = events.copy()
+    events_shifted['t'] = events_shifted['t'] + offset
+    return events_shifted
+
+def find_optimal_alignment(events1: Dict, events2: Dict, sample_start: float, sample_duration: float = 0.1, 
+                          search_range: float = 0.01, search_step: float = 0.002) -> float:
+    """
+    使用Chamfer距离找到最佳时间对齐偏移（参考已有time_offset_analysis.py逻辑）
+    
+    Args:
+        events1: 参考事件流（通常是干净数据）
+        events2: 待对齐事件流（通常是带炫光数据）  
+        sample_start: 基准采样起始时间
+        sample_duration: 采样持续时间
+        search_range: 搜索范围（±秒）
+        search_step: 搜索步长（秒）
+    
+    Returns:
+        最佳偏移量（秒）
+    """
+    from metrics import calculate_all_metrics
+    
+    # 提取参考区间的事件（固定）
+    ref_events = time_align_events(events1, sample_start, sample_start + sample_duration)
+    ref_array = np.array([(x, y, p, t) for x, y, p, t in zip(
+        ref_events['x'], ref_events['y'], ref_events['p'], ref_events['t']
+    )], dtype=[('x', '<u2'), ('y', '<u2'), ('p', 'i1'), ('t', '<f8')])
+    
+    if len(ref_array) == 0:
+        print("警告: 参考区间无事件，使用零偏移")
+        return 0.0
+    
+    best_offset = 0.0
+    best_distance = float('inf')
+    
+    # 在搜索范围内寻找最佳偏移（参考time_offset_analysis.py的逻辑）
+    search_offsets = np.arange(-search_range, search_range + search_step, search_step)
+    
+    for offset in search_offsets:
+        # 提取待对齐区间的事件
+        align_start = sample_start + offset
+        align_end = align_start + sample_duration
+        
+        # 确保在有效时间范围内
+        if align_start < 0 or align_end > events2['t'][-1]:
+            continue
+            
+        test_events = time_align_events(events2, align_start, align_end)
+        test_array = np.array([(x, y, p, t) for x, y, p, t in zip(
+            test_events['x'], test_events['y'], test_events['p'], test_events['t']
+        )], dtype=[('x', '<u2'), ('y', '<u2'), ('p', 'i1'), ('t', '<f8')])
+        
+        if len(test_array) == 0:
+            continue
+            
+        try:
+            # 直接使用Chamfer距离计算，避免其他指标的依赖问题
+            from metrics import calculate_chamfer_distance
+            distance = calculate_chamfer_distance(ref_array, test_array)
+            
+            if distance < best_distance:
+                best_distance = distance
+                best_offset = offset
+                
+        except Exception as e:
+            # 跳过计算失败的偏移
+            continue
+    
+    print(f"最佳对齐偏移: {best_offset:.3f}s, Chamfer距离: {best_distance:.3f}")
+    return best_offset
+
 def time_align_events(events: Dict, start_time: float, end_time: float) -> Dict[str, np.ndarray]:
     """
     根据时间范围对齐事件数据
@@ -100,17 +175,23 @@ def time_align_events(events: Dict, start_time: float, end_time: float) -> Dict[
     
     return aligned_events
 
-def crop_and_remap_events(events: Dict, target_size: Tuple[int, int] = (640, 480)) -> Dict[str, np.ndarray]:
+def crop_and_remap_events(events: Dict, target_size: Tuple[int, int] = (640, 480), 
+                         crop_seed: Optional[int] = None) -> Dict[str, np.ndarray]:
     """
     裁剪并重映射事件数据到目标分辨率
     
     Args:
         events: 原始事件数据
         target_size: 目标尺寸 (640, 480)
+        crop_seed: 随机种子，确保每对数据使用不同的裁剪区域
     
     Returns:
         重映射后的事件数据
     """
+    # 如果提供了种子，设置随机种子以获得不同的裁剪区域
+    if crop_seed is not None:
+        np.random.seed(crop_seed)
+        random.seed(crop_seed)
     orig_width, orig_height = events['sensor_size']
     target_width, target_height = target_size
     
@@ -181,32 +262,46 @@ def save_dsec_format(events: Dict, output_path: str, sample_id: int):
     
     with h5py.File(output_path, 'w') as f:
         events_group = f.create_group('events')
-        events_group.create_dataset('t', data=timestamps_us)
-        events_group.create_dataset('x', data=events['x'])  
-        events_group.create_dataset('y', data=events['y'])
-        events_group.create_dataset('p', data=polarity)
+        # 使用gzip压缩，与DSEC格式一致
+        events_group.create_dataset('t', data=timestamps_us, compression='gzip', compression_opts=6)
+        events_group.create_dataset('x', data=events['x'], compression='gzip', compression_opts=6)  
+        events_group.create_dataset('y', data=events['y'], compression='gzip', compression_opts=6)
+        events_group.create_dataset('p', data=polarity, compression='gzip', compression_opts=6)
         
     print(f"Saved sample {sample_id}: {len(events['x'])} events to {output_path}")
 
 def generate_random_sample_times(overlap_start: float, overlap_end: float, 
                                num_samples: int = 10, sample_duration: float = 0.1) -> list:
     """
-    在重叠区间内生成随机的采样时间点
-    确保每个100ms样本都在有效范围内
+    在重叠区间内生成均匀分布的采样时间点
+    确保样本在整个可用时间范围内均匀分布
     """
     available_duration = overlap_end - overlap_start - sample_duration
     
     if available_duration <= 0:
         raise ValueError(f"重叠区间太短({overlap_end - overlap_start:.3f}s)，无法生成{sample_duration}s的样本")
     
+    # 使用均匀分布而非完全随机，确保覆盖整个时间范围
     sample_starts = []
+    
+    # 将可用时间分成num_samples个区间，每个区间内随机选择
+    interval_size = available_duration / num_samples
+    
     for i in range(num_samples):
-        # 生成随机起始时间
-        random_start = overlap_start + random.uniform(0, available_duration)
+        # 每个样本在其分配的时间区间内随机选择起始点
+        interval_start = overlap_start + i * interval_size
+        interval_end = interval_start + interval_size
+        
+        # 在区间内随机选择（如果区间太小就取区间开始）
+        if interval_size > 0.01:  # 如果区间>10ms，随机选择
+            random_start = random.uniform(interval_start, min(interval_end, overlap_start + available_duration))
+        else:
+            random_start = interval_start
+            
         sample_starts.append(random_start)
         print(f"Sample {i+1} time range: {random_start:.3f}s - {random_start + sample_duration:.3f}s")
     
-    return sample_starts
+    return sorted(sample_starts)  # 按时间排序
 
 def main():
     """主函数"""
@@ -246,16 +341,27 @@ def main():
         print(f"\n--- Processing Sample {sample_id} ---")
         print(f"Time range: {sample_start:.3f}s - {sample_end:.3f}s")
         
-        # 时间对齐
+        # 指标对齐：找到最佳时间偏移
+        print("Finding optimal alignment using Chamfer distance...")
+        try:
+            best_offset = find_optimal_alignment(noflare_events, sixflare_events, sample_start, 
+                                               sample_duration=sample_end-sample_start,
+                                               search_range=0.01, search_step=0.002)
+        except Exception as e:
+            print(f"警告: 指标对齐失败，使用零偏移: {e}")
+            best_offset = 0.0
+        
+        # 应用指标对齐
         noflare_aligned = time_align_events(noflare_events, sample_start, sample_end)
-        sixflare_aligned = time_align_events(sixflare_events, sample_start, sample_end)
+        sixflare_aligned = time_align_events(sixflare_events, sample_start + best_offset, sample_end + best_offset)
         
         print(f"Aligned events - NoFlare: {len(noflare_aligned['x'])}, SixFlare: {len(sixflare_aligned['x'])}")
         
         # 空间裁剪重映射（每个样本使用不同的随机裁剪区域）
         print("Applying spatial crop and remap...")
-        noflare_cropped = crop_and_remap_events(noflare_aligned)
-        sixflare_cropped = crop_and_remap_events(sixflare_aligned)
+        crop_seed = sample_id * 42  # 每对数据使用不同的裁剪种子
+        noflare_cropped = crop_and_remap_events(noflare_aligned, crop_seed=crop_seed)
+        sixflare_cropped = crop_and_remap_events(sixflare_aligned, crop_seed=crop_seed)
         
         print(f"Final events - NoFlare: {len(noflare_cropped['x'])}, SixFlare: {len(sixflare_cropped['x'])}")
         
