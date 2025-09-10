@@ -14,7 +14,7 @@ import numpy as np
 import h5py
 from pathlib import Path
 import random
-from typing import Tuple, Dict, Optional
+from typing import Tuple, Dict, Optional, List
 
 def read_evk4_npy_events(npy_folder: str) -> Dict[str, np.ndarray]:
     """
@@ -83,79 +83,86 @@ def find_time_overlap(events1: Dict, events2: Dict) -> Tuple[float, float]:
     
     return overlap_start, overlap_end
 
-def shift_timestamps(events: Dict, offset: float) -> Dict:
+def calculate_polarity_ratios(events: Dict, start_time: float) -> List[float]:
     """
-    对事件时间戳进行偏移（参考已有代码）
-    """
-    events_shifted = events.copy()
-    events_shifted['t'] = events_shifted['t'] + offset
-    return events_shifted
-
-def find_optimal_alignment(events1: Dict, events2: Dict, sample_start: float, sample_duration: float = 0.1, 
-                          search_range: float = 0.01, search_step: float = 0.002) -> float:
-    """
-    使用Chamfer距离找到最佳时间对齐偏移（参考已有time_offset_analysis.py逻辑）
+    计算四个时间窗口的正极性占比
+    时间窗口: 0-2.5ms, 2.5-5ms, 5-7.5ms, 7.5-10ms
     
     Args:
-        events1: 参考事件流（通常是干净数据）
-        events2: 待对齐事件流（通常是带炫光数据）  
+        events: 事件数据
+        start_time: 开始时间
+    
+    Returns:
+        四个时间窗口的正极性占比列表
+    """
+    time_windows = [
+        (start_time, start_time + 0.0025),      # 0-2.5ms
+        (start_time + 0.0025, start_time + 0.005),   # 2.5-5ms 
+        (start_time + 0.005, start_time + 0.0075),   # 5-7.5ms
+        (start_time + 0.0075, start_time + 0.01)     # 7.5-10ms
+    ]
+    
+    ratios = []
+    t = events['t']
+    p = events['p']
+    
+    for window_start, window_end in time_windows:
+        # 提取时间窗口内的事件
+        mask = (t >= window_start) & (t < window_end)
+        window_events = p[mask]
+        
+        if len(window_events) == 0:
+            ratios.append(0.5)  # 默认50%，避免空窗口问题
+        else:
+            # 计算正极性占比
+            positive_count = np.sum(window_events == 1)
+            ratio = positive_count / len(window_events)
+            ratios.append(ratio)
+    
+    return ratios
+
+def find_optimal_alignment_polarity(events1: Dict, events2: Dict, sample_start: float) -> float:
+    """
+    使用正极性占比进行时间对齐
+    
+    Args:
+        events1: 参考事件流（通常是干净数据），固定从sample_start开始
+        events2: 待对齐事件流（通常是带炫光数据），测试不同起始点
         sample_start: 基准采样起始时间
-        sample_duration: 采样持续时间
-        search_range: 搜索范围（±秒）
-        search_step: 搜索步长（秒）
     
     Returns:
         最佳偏移量（秒）
     """
-    from metrics import calculate_all_metrics
     
-    # 提取参考区间的事件（固定）
-    ref_events = time_align_events(events1, sample_start, sample_start + sample_duration)
-    ref_array = np.array([(x, y, p, t) for x, y, p, t in zip(
-        ref_events['x'], ref_events['y'], ref_events['p'], ref_events['t']
-    )], dtype=[('x', '<u2'), ('y', '<u2'), ('p', 'i1'), ('t', '<f8')])
-    
-    if len(ref_array) == 0:
-        print("警告: 参考区间无事件，使用零偏移")
-        return 0.0
+    # 计算参考数据的正极性占比（固定从sample_start开始）
+    ref_ratios = calculate_polarity_ratios(events1, sample_start)
+    print(f"参考数据正极性占比: {[f'{r:.3f}' for r in ref_ratios]}")
     
     best_offset = 0.0
-    best_distance = float('inf')
+    best_difference = float('inf')
     
-    # 在搜索范围内寻找最佳偏移（参考time_offset_analysis.py的逻辑）
-    search_offsets = np.arange(-search_range, search_range + search_step, search_step)
-    
-    for offset in search_offsets:
-        # 提取待对齐区间的事件
-        align_start = sample_start + offset
-        align_end = align_start + sample_duration
+    # 搜索20步，每步0.5ms
+    for step in range(20):
+        offset = step * 0.0005  # 0.5ms步长
+        test_start = sample_start + offset
         
         # 确保在有效时间范围内
-        if align_start < 0 or align_end > events2['t'][-1]:
-            continue
+        if test_start + 0.01 > events2['t'][-1]:  # 需要10ms的数据
+            break
             
-        test_events = time_align_events(events2, align_start, align_end)
-        test_array = np.array([(x, y, p, t) for x, y, p, t in zip(
-            test_events['x'], test_events['y'], test_events['p'], test_events['t']
-        )], dtype=[('x', '<u2'), ('y', '<u2'), ('p', 'i1'), ('t', '<f8')])
+        # 计算测试数据的正极性占比
+        test_ratios = calculate_polarity_ratios(events2, test_start)
         
-        if len(test_array) == 0:
-            continue
-            
-        try:
-            # 直接使用Chamfer距离计算，避免其他指标的依赖问题
-            from metrics import calculate_chamfer_distance
-            distance = calculate_chamfer_distance(ref_array, test_array)
-            
-            if distance < best_distance:
-                best_distance = distance
-                best_offset = offset
-                
-        except Exception as e:
-            # 跳过计算失败的偏移
-            continue
+        # 计算四个窗口占比差距之和
+        difference = sum(abs(r1 - r2) for r1, r2 in zip(ref_ratios, test_ratios))
+        
+        print(f"偏移 {offset*1000:.1f}ms: 测试占比 {[f'{r:.3f}' for r in test_ratios]}, 差距和: {difference:.6f}")
+        
+        if difference < best_difference:
+            best_difference = difference
+            best_offset = offset
     
-    print(f"最佳对齐偏移: {best_offset:.3f}s, Chamfer距离: {best_distance:.3f}")
+    print(f"最佳对齐偏移: {best_offset*1000:.1f}ms, 最小差距和: {best_difference:.6f}")
     return best_offset
 
 def time_align_events(events: Dict, start_time: float, end_time: float) -> Dict[str, np.ndarray]:
@@ -199,9 +206,16 @@ def crop_and_remap_events(events: Dict, target_size: Tuple[int, int] = (640, 480
     center_x = orig_width // 2
     center_y = orig_height // 2
     
-    # 随机偏移，但保证裁剪区域包含中心点
-    max_offset_x = min(center_x, orig_width - target_width - center_x) if orig_width > target_width else 0
-    max_offset_y = min(center_y, orig_height - target_height - center_y) if orig_height > target_height else 0
+    # 计算最大允许的随机偏移范围
+    # 裁剪窗口的左上角可以在 (0, 0) 到 (orig_width-target_width, orig_height-target_height) 之间
+    # 中心裁剪的起始点是 (center_x - target_width//2, center_y - target_height//2)
+    center_crop_x_start = center_x - target_width // 2
+    center_crop_y_start = center_y - target_height // 2
+    
+    max_offset_x = min(center_crop_x_start, (orig_width - target_width) - center_crop_x_start) if orig_width > target_width else 0
+    max_offset_y = min(center_crop_y_start, (orig_height - target_height) - center_crop_y_start) if orig_height > target_height else 0
+    
+    print(f"Max offset range - X: ±{max_offset_x}, Y: ±{max_offset_y}")
     
     if max_offset_x > 0:
         offset_x = random.randint(-max_offset_x, max_offset_x)
@@ -212,6 +226,8 @@ def crop_and_remap_events(events: Dict, target_size: Tuple[int, int] = (640, 480
         offset_y = random.randint(-max_offset_y, max_offset_y)
     else:
         offset_y = 0
+    
+    print(f"Applied offset - X: {offset_x}, Y: {offset_y}")
     
     # 计算裁剪窗口
     crop_x_start = center_x - target_width // 2 + offset_x
@@ -341,14 +357,12 @@ def main():
         print(f"\n--- Processing Sample {sample_id} ---")
         print(f"Time range: {sample_start:.3f}s - {sample_end:.3f}s")
         
-        # 指标对齐：找到最佳时间偏移
-        print("Finding optimal alignment using Chamfer distance...")
+        # 极性占比对齐：找到最佳时间偏移
+        print("Finding optimal alignment using polarity ratios...")
         try:
-            best_offset = find_optimal_alignment(noflare_events, sixflare_events, sample_start, 
-                                               sample_duration=sample_end-sample_start,
-                                               search_range=0.01, search_step=0.002)
+            best_offset = find_optimal_alignment_polarity(noflare_events, sixflare_events, sample_start)
         except Exception as e:
-            print(f"警告: 指标对齐失败，使用零偏移: {e}")
+            print(f"警告: 极性对齐失败，使用零偏移: {e}")
             best_offset = 0.0
         
         # 应用指标对齐
