@@ -346,10 +346,39 @@ python evaluate_all_methods.py --metrics chamfer_distance tf1 tpf1 pmse_2 --outp
 python evaluate_all_methods.py --num-samples 5 --output results
 ```
 
+### **EVK4数据评估（新增）**
+```bash
+cd /mnt/e/2025/event_flick_flare/experiments/main_experiments
+
+# 🎯 EVK4完整指标评估（需要Umain环境支持voxel指标）
+source ~/miniconda3/bin/activate && conda activate Umain
+python evaluate_evk4_methods.py --output results
+
+# 查看EVK4可用指标
+python evaluate_evk4_methods.py --list-metrics
+
+# 快速测试少量样本
+python evaluate_evk4_methods.py --num-samples 3 --output results
+
+# 使用特定指标组合
+python evaluate_evk4_methods.py --metrics chamfer_distance tf1 tpf1 pmse_2 --output results
+
+# 静默模式
+python evaluate_evk4_methods.py --quiet --output results
+```
+
 ### **结果文件**
-- **主结果**: `results/multi_method_evaluation_results.csv` (推荐)
+- **Simu数据**: `results/multi_method_evaluation_results.csv`
+- **EVK4数据**: `results/evk4_evaluation_results.csv`
 - **格式**: sample_id, {method1}_{metric1}, {method1}_{metric2}, {method2}_{metric1}, ...
 - **特点**: 包含所有发现的方法×所选指标，最后一行为AVERAGE，适合论文直接使用
+
+### **默认指标详解**
+**EVK4评估默认包含9个指标**：
+- **传统指标**: chamfer_distance, gaussian_distance  
+- **Voxel PMSE**: pmse_2, pmse_4
+- **Voxel F1**: rf1, tf1, tpf1 
+- **实用指标**: event_count_ratio, temporal_overlap
 
 ## 环境管理
 
