@@ -1,11 +1,26 @@
 #!/usr/bin/env python3
 """
-从NPY格式的EVK4数据生成DSEC格式的训练数据集
-- noflare作为target（真值）
-- sixflare作为input（带炫光）
-- 时间对齐后随机采样100ms片段
-- 空间裁剪重映射到640×480分辨率
-- 每对数据使用不同的时间起点和裁剪区域
+Defocus EVK4 Dataset Generator
+
+专门用于处理defocus组数据的数据集生成器。
+包含光源滤波、噪声增强、时间对齐等完整处理流程。
+
+数据源：
+- NoFlare: Datasets/EVK4/full_noFlare_part_defocus
+- SixFlare: Datasets/EVK4/full_sixFlare_part_defocus
+
+处理流程：
+1. 读取NPY格式的EVK4事件数据
+2. 圆形光源区域滤波 (圆心600,210，半径30px)
+3. 添加时空随机噪声 (10万个随机事件)
+4. 基于极性占比的时间对齐
+5. 随机采样10个100ms数据段
+6. 空间裁剪重映射 (1280×720 → 640×480)
+7. 保存为DSEC格式H5文件
+
+输出：
+- 目录: evk4_defocus_dataset_dsec_format_from_npy/
+- 格式: defocus_XXXms_sampleY.h5
 """
 
 import os
@@ -171,9 +186,9 @@ def filter_light_source_circular(events: Dict, center_x: int = 600, center_y: in
     
     Args:
         events: 原始事件数据
-        center_x: 圆心X坐标 (默认937)
-        center_y: 圆心Y坐标 (默认320)
-        radius: 圆半径(像素) (默认20)
+        center_x: 圆心X坐标 (默认600)
+        center_y: 圆心Y坐标 (默认210)
+        radius: 圆半径(像素) (默认30)
     
     Returns:
         滤波后的事件数据，只包含圆形区域内的事件
@@ -418,7 +433,7 @@ def generate_random_sample_times(overlap_start: float, overlap_end: float,
 
 def main():
     """主函数"""
-    # 设置路径 - 使用defocus数据
+    # 设置路径 - defocus数据
     noflare_npy_folder = "Datasets/EVK4/full_noFlare_part_defocus"
     sixflare_npy_folder = "Datasets/EVK4/full_sixFlare_part_defocus" 
     output_dir = "evk4_defocus_dataset_dsec_format_from_npy"  # defocus输出目录名
@@ -492,14 +507,15 @@ def main():
         save_dsec_format(noflare_cropped, target_file, f"target_{sample_id}")
         save_dsec_format(sixflare_cropped, input_file, f"input_{sample_id}")
     
-    print(f"\n=== Dataset Generation Complete ===")
+    print(f"\n=== Defocus Dataset Generation Complete ===")
     print(f"Generated 10 pairs of defocus training data")
-    print(f"Target files (clean, light-filtered): {target_dir}/")  
+    print(f"Target files (clean, light-filtered + noise): {target_dir}/")  
     print(f"Input files (with flare): {input_dir}/")
     print(f"Format: DSEC-compatible HDF5")
     print(f"Resolution: 640×480")
     print(f"Duration per sample: 100ms")
-    print(f"Light source filtering: Circle center(937,320), radius=20px applied to noFlare data")
+    print(f"Light source filtering: Circle center(600,210), radius=30px applied to noFlare data")
+    print(f"Noise enhancement: 100,000 spatiotemporal random events added to noFlare data")
 
 if __name__ == "__main__":
     # 设置随机种子以获得可重现的结果
