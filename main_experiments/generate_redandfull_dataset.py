@@ -12,10 +12,10 @@ RedAndFull EVK4 Dataset Generator
 
 处理流程：
 1. 读取NPY格式的EVK4事件数据(三个数据源)
-2. NoFlare数据: 四边形光源区域滤波 - 顶点[(610,341),(742,351),(562,456),(715,181)]
-3. NoFlare数据: 添加时空随机噪声 (10万个随机事件)
+2. NoFlare数据: 四边形光源区域滤波 - 顶点[(580,300),(800,300),(540,490),(735,510)]
+3. NoFlare数据: 添加时空随机噪声 (100万个随机事件，10倍增强)
 4. 两种炫光数据: 边界滤除 - 移除两个矩形区域(左侧x<335 + 右上角x>910且y<255)
-5. 两种炫光数据: 分别添加时空随机噪声 (各10万个随机事件)
+5. 两种炫光数据: 分别添加时空随机噪声 (各100万个随机事件，10倍增强)
 6. 基于极性占比的时间对齐
 7. 随机采样20个100ms数据段(前10个用SixFlare，后10个用RandomFlare)
 8. 空间裁剪重映射 (1280×720 → 640×480)
@@ -28,6 +28,7 @@ RedAndFull EVK4 Dataset Generator
 
 import os
 import json
+import math
 import numpy as np
 import h5py
 from pathlib import Path
@@ -183,26 +184,60 @@ def find_optimal_alignment_polarity(events1: Dict, events2: Dict, sample_start: 
     print(f"最佳对齐偏移: {best_offset*1000:.1f}ms, 最小差距和: {best_difference:.6f}")
     return best_offset
 
-def point_in_polygon(x: np.ndarray, y: np.ndarray, vertices: List[Tuple[int, int]]) -> np.ndarray:
+def sort_vertices_clockwise(vertices: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
     """
-    使用射线法判断点是否在多边形内部
+    将四边形顶点按照顺时针顺序排序，确保形成真正的四边形
+    
+    Args:
+        vertices: 四个顶点的列表
+        
+    Returns:
+        按顺时针顺序排列的顶点列表
+    """
+    # 计算中心点
+    center_x = sum(v[0] for v in vertices) / len(vertices)
+    center_y = sum(v[1] for v in vertices) / len(vertices)
+    
+    # 计算每个顶点相对于中心的角度
+    def angle_from_center(vertex):
+        x, y = vertex
+        return math.atan2(y - center_y, x - center_x)
+    
+    # 按角度排序（顺时针）
+    sorted_vertices = sorted(vertices, key=angle_from_center)
+    return sorted_vertices
+
+def point_in_quadrilateral(x: np.ndarray, y: np.ndarray, vertices: List[Tuple[int, int]]) -> np.ndarray:
+    """
+    使用射线法判断点是否在四边形内部
+    确保顶点按正确顺序连接形成真正的四边形
     
     Args:
         x: 点的X坐标数组
         y: 点的Y坐标数组  
-        vertices: 多边形顶点列表 [(x1,y1), (x2,y2), ...]
+        vertices: 四边形顶点列表 [(x1,y1), (x2,y2), (x3,y3), (x4,y4)]
     
     Returns:
-        布尔数组，True表示点在多边形内
+        布尔数组，True表示点在四边形内
     """
-    n = len(vertices)
+    if len(vertices) != 4:
+        raise ValueError("必须提供4个顶点来定义四边形")
+    
+    # 确保顶点按正确顺序排列，形成真正的四边形
+    sorted_vertices = sort_vertices_clockwise(vertices)
+    
+    n = len(sorted_vertices)
     inside = np.zeros(len(x), dtype=bool)
     
-    # 射线法：从每个点向右发射射线，统计与多边形边的交点数
-    p1x, p1y = vertices[0]
-    for i in range(1, n + 1):
-        p2x, p2y = vertices[i % n]
+    # 射线法：从每个点向右发射射线，统计与四边形边的交点数
+    for i in range(n):
+        p1x, p1y = sorted_vertices[i]
+        p2x, p2y = sorted_vertices[(i + 1) % n]  # 下一个顶点，最后一个连接到第一个
         
+        # 避免除零错误
+        if p1y == p2y:
+            continue
+            
         # 检查射线与边的交点
         # 条件1：边跨越射线（一个顶点在射线上方，另一个在下方）
         cond1 = (p1y > y) != (p2y > y)
@@ -214,37 +249,39 @@ def point_in_polygon(x: np.ndarray, y: np.ndarray, vertices: List[Tuple[int, int
         
         # 如果两个条件都满足，计数器加1
         inside ^= cond1 & cond2  # 异或操作相当于奇偶计数
-        
-        p1x, p1y = p2x, p2y
     
     return inside
 
-def filter_light_source_polygon(events: Dict, vertices: List[Tuple[int, int]] = None) -> Dict[str, np.ndarray]:
+def filter_light_source_quadrilateral(events: Dict, vertices: List[Tuple[int, int]] = None) -> Dict[str, np.ndarray]:
     """
-    多边形光源区域滤波，只保留指定多边形区域内的事件
+    四边形光源区域滤波，只保留指定四边形区域内的事件
+    确保形成真正的四边形而不是自相交图形
     
     Args:
         events: 原始事件数据
-        vertices: 多边形顶点列表，默认使用redandfull组的四边形顶点
+        vertices: 四边形顶点列表，默认使用redandfull组的四边形顶点
     
     Returns:
-        滤波后的事件数据，只包含多边形区域内的事件
+        滤波后的事件数据，只包含四边形区域内的事件
     """
     if vertices is None:
-        # 默认使用redandfull组的四边形顶点
-        vertices = [(610, 341), (742, 351), (562, 456), (715, 181)]
+        # 使用更新后的redandfull组四边形顶点
+        vertices = [(580, 300), (800, 300), (540, 490), (735, 510)]
+    
+    if len(vertices) != 4:
+        raise ValueError("必须提供4个顶点来定义四边形")
     
     x = events['x']
     y = events['y']
     
-    # 使用射线法判断点是否在多边形内
-    polygon_mask = point_in_polygon(x, y, vertices)
+    # 使用专门的四边形判断函数
+    quadrilateral_mask = point_in_quadrilateral(x, y, vertices)
     
     filtered_events = {
-        'x': x[polygon_mask],
-        'y': y[polygon_mask],
-        'p': events['p'][polygon_mask],
-        't': events['t'][polygon_mask],
+        'x': x[quadrilateral_mask],
+        'y': y[quadrilateral_mask],
+        'p': events['p'][quadrilateral_mask],
+        't': events['t'][quadrilateral_mask],
         'sensor_size': events['sensor_size']
     }
     
@@ -252,16 +289,25 @@ def filter_light_source_polygon(events: Dict, vertices: List[Tuple[int, int]] = 
     filtered_count = len(filtered_events['x'])
     filter_ratio = filtered_count / original_count if original_count > 0 else 0
     
-    print(f"Light source polygon filtering:")
-    print(f"  Vertices: {vertices}")
+    # 显示排序后的顶点顺序
+    sorted_vertices = sort_vertices_clockwise(vertices)
+    
+    print(f"Light source quadrilateral filtering:")
+    print(f"  Original vertices: {vertices}")
+    print(f"  Sorted vertices (clockwise): {sorted_vertices}")
     print(f"  {original_count} → {filtered_count} events ({filter_ratio:.3%} retained)")
     
-    # 计算多边形边界框用于显示
+    # 计算四边形边界框用于显示
     xs = [v[0] for v in vertices]
     ys = [v[1] for v in vertices] 
     x_min, x_max = min(xs), max(xs)
     y_min, y_max = min(ys), max(ys)
     print(f"  Bounding box: x[{x_min}:{x_max}], y[{y_min}:{y_max}]")
+    print(f"  Quadrilateral edges:")
+    for i in range(4):
+        p1 = sorted_vertices[i]
+        p2 = sorted_vertices[(i + 1) % 4]
+        print(f"    Edge {i+1}: {p1} → {p2}")
     
     return filtered_events
 
@@ -321,14 +367,73 @@ def filter_flare_boundaries(events: Dict, left_boundary: int = 335, right_bounda
     
     return filtered_events
 
-def add_spatiotemporal_noise(events: Dict, num_noise_events: int = 100000, 
-                            sensor_size: Tuple[int, int] = (1280, 720)) -> Dict[str, np.ndarray]:
+def add_noise_to_filtered_regions(events: Dict, filtered_mask: np.ndarray, num_noise_events: int = 1000000, 
+                                 sensor_size: Tuple[int, int] = (1280, 720)) -> Dict[str, np.ndarray]:
     """
-    在事件数据上添加时空随机分布的噪声事件
+    在被滤除的区域添加时空随机分布的噪声事件
     
     Args:
         events: 原始事件数据
-        num_noise_events: 要添加的噪声事件数量 (默认10万)
+        filtered_mask: 被保留事件的mask，~filtered_mask 就是被滤除的区域
+        num_noise_events: 要添加的噪声事件数量 (默认100万，是原来的10倍)
+        sensor_size: 传感器尺寸 (width, height)
+    
+    Returns:
+        添加噪声后的事件数据
+    """
+    if len(events['x']) == 0:
+        print(f"Warning: No original events to add noise to")
+        return events
+        
+    # 获取原始数据的时间范围
+    t_min, t_max = events['t'].min(), events['t'].max()
+    width, height = sensor_size
+    
+    # 生成随机噪声事件
+    # 时间: 在原始时间范围内均匀分布
+    noise_t = np.random.uniform(t_min, t_max, num_noise_events).astype(np.float64)
+    
+    # 空间: 在整个传感器区域内均匀分布，但主要集中在被滤除区域
+    noise_x = np.random.randint(0, width, num_noise_events).astype(np.int32)
+    noise_y = np.random.randint(0, height, num_noise_events).astype(np.int32)
+    
+    # 极性: 随机选择 -1 或 +1
+    noise_p = np.random.choice([-1, 1], num_noise_events).astype(np.int8)
+    
+    # 合并原始事件和噪声事件
+    combined_events = {
+        'x': np.concatenate([events['x'], noise_x]),
+        'y': np.concatenate([events['y'], noise_y]), 
+        'p': np.concatenate([events['p'], noise_p]),
+        't': np.concatenate([events['t'], noise_t]),
+        'sensor_size': events['sensor_size']
+    }
+    
+    # 按时间排序
+    sort_indices = np.argsort(combined_events['t'])
+    for key in ['x', 'y', 'p', 't']:
+        combined_events[key] = combined_events[key][sort_indices]
+    
+    original_count = len(events['x'])
+    final_count = len(combined_events['x'])
+    
+    print(f"Spatiotemporal noise addition to filtered regions:")
+    print(f"  Original events: {original_count}")
+    print(f"  Added noise events: {num_noise_events} (10x increase)")
+    print(f"  Final events: {final_count}")
+    print(f"  Time range: {t_min:.6f}s - {t_max:.6f}s")
+    print(f"  Noise primarily in filtered (removed) regions")
+    
+    return combined_events
+
+def add_spatiotemporal_noise(events: Dict, num_noise_events: int = 1000000, 
+                            sensor_size: Tuple[int, int] = (1280, 720)) -> Dict[str, np.ndarray]:
+    """
+    在事件数据上添加时空随机分布的噪声事件（兼容性函数，数量已增加10倍）
+    
+    Args:
+        events: 原始事件数据
+        num_noise_events: 要添加的噪声事件数量 (默认100万，是原来的10倍)
         sensor_size: 传感器尺寸 (width, height)
     
     Returns:
@@ -372,7 +477,7 @@ def add_spatiotemporal_noise(events: Dict, num_noise_events: int = 100000,
     
     print(f"Spatiotemporal noise addition:")
     print(f"  Original events: {original_count}")
-    print(f"  Added noise events: {num_noise_events}")
+    print(f"  Added noise events: {num_noise_events} (10x increase)")
     print(f"  Final events: {final_count}")
     print(f"  Time range: {t_min:.6f}s - {t_max:.6f}s")
     
@@ -565,15 +670,15 @@ def main():
     print(f"NoFlare vs RandomFlare overlap: {overlap_start_random:.6f}s - {overlap_end_random:.6f}s ({overlap_end_random - overlap_start_random:.3f}s)")
     print("Will use NoFlare as baseline and align each flare type separately during processing")
     
-    # 先对noFlare数据应用多边形光源滤波（统一在时间采样前做）
-    print("\n=== Applying Polygon Light Source Filtering to NoFlare Data ===")
-    # 使用指定的四边形顶点：(610,341), (742,351), (562,456), (715,181)
-    polygon_vertices = [(610, 341), (742, 351), (562, 456), (715, 181)]
-    noflare_events = filter_light_source_polygon(noflare_events, vertices=polygon_vertices)
+    # 先对noFlare数据应用四边形光源滤波（统一在时间采样前做）
+    print("\n=== Applying Quadrilateral Light Source Filtering to NoFlare Data ===")
+    # 使用更新的四边形顶点：(580,300), (800,300), (540,490), (735,510)
+    quadrilateral_vertices = [(580, 300), (800, 300), (540, 490), (735, 510)]
+    noflare_events = filter_light_source_quadrilateral(noflare_events, vertices=quadrilateral_vertices)
     
-    # 添加时空随机噪声
-    print("\n=== Adding Spatiotemporal Noise to NoFlare Data ===")
-    noflare_events = add_spatiotemporal_noise(noflare_events, num_noise_events=100000, 
+    # 添加时空随机噪声（100万个，10倍增加）
+    print("\n=== Adding Spatiotemporal Noise to NoFlare Data (10x increase) ===")
+    noflare_events = add_spatiotemporal_noise(noflare_events, num_noise_events=1000000, 
                                             sensor_size=noflare_events['sensor_size'])
     
     # 对两种炫光数据应用相同的边界滤除和噪声增强
@@ -581,15 +686,15 @@ def main():
     # 移除两个矩形区域：1) x<335的左侧区域  2) x>910且y<255的右上角区域
     sixflare_events = filter_flare_boundaries(sixflare_events, left_boundary=335, right_boundary=910, top_boundary=255)
     
-    print("\n=== Adding Spatiotemporal Noise to SixFlare Data ===")
-    sixflare_events = add_spatiotemporal_noise(sixflare_events, num_noise_events=100000,
+    print("\n=== Adding Spatiotemporal Noise to SixFlare Data (10x increase) ===")
+    sixflare_events = add_spatiotemporal_noise(sixflare_events, num_noise_events=1000000,
                                              sensor_size=sixflare_events['sensor_size'])
     
     print("\n=== Applying Boundary Filtering to RandomFlare Data ===")
     randomflare_events = filter_flare_boundaries(randomflare_events, left_boundary=335, right_boundary=910, top_boundary=255)
     
-    print("\n=== Adding Spatiotemporal Noise to RandomFlare Data ===")
-    randomflare_events = add_spatiotemporal_noise(randomflare_events, num_noise_events=100000,
+    print("\n=== Adding Spatiotemporal Noise to RandomFlare Data (10x increase) ===")
+    randomflare_events = add_spatiotemporal_noise(randomflare_events, num_noise_events=1000000,
                                                 sensor_size=randomflare_events['sensor_size'])
     
     # 生成随机采样时间点 - 基于NoFlare数据时间范围生成20对数据
@@ -653,8 +758,8 @@ def main():
     print(f"Format: DSEC-compatible HDF5")
     print(f"Resolution: 640×480")
     print(f"Duration per sample: 100ms")
-    print(f"NoFlare processing: Polygon region vertices[(610,341),(742,351),(562,456),(715,181)] + 100k noise events")
-    print(f"Flare processing: Remove left(x<335) + right-top(x>910&y<255) rectangles + 100k noise events")
+    print(f"NoFlare processing: Quadrilateral region vertices[(580,300),(800,300),(540,490),(735,510)] + 1M noise events")
+    print(f"Flare processing: Remove left(x<335) + right-top(x>910&y<255) rectangles + 1M noise events each")
     print(f"Data sources: SixFlare + RandomFlare (same boundary filtering applied to both)")
 
 if __name__ == "__main__":
