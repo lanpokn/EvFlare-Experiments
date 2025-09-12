@@ -12,9 +12,9 @@ RedAndFull EVK4 Dataset Generator
 
 处理流程：
 1. 读取NPY格式的EVK4事件数据(三个数据源)
-2. NoFlare数据: 四边形光源区域滤波 - 顶点[(580,300),(800,300),(540,490),(735,510)]
+2. NoFlare数据: 四边形光源区域平滑滤波 - 顶点[(600,320),(780,320),(560,470),(715,490)], 50px平滑过渡
 3. NoFlare数据: 添加时空随机噪声 (100万个随机事件，10倍增强)
-4. 两种炫光数据: 边界滤除 - 移除两个矩形区域(左侧x<335 + 右上角x>910且y<255)
+4. 两种炫光数据: 边界平滑滤除 - 移除两个矩形区域(左侧x<335 + 右上角x>910且y<255), 50px平滑过渡
 5. 两种炫光数据: 分别添加时空随机噪声 (各100万个随机事件，10倍增强)
 6. 基于极性占比的时间对齐
 7. 随机采样20个100ms数据段(前10个用SixFlare，后10个用RandomFlare)
@@ -252,21 +252,77 @@ def point_in_quadrilateral(x: np.ndarray, y: np.ndarray, vertices: List[Tuple[in
     
     return inside
 
-def filter_light_source_quadrilateral(events: Dict, vertices: List[Tuple[int, int]] = None) -> Dict[str, np.ndarray]:
+def distance_to_polygon(x: np.ndarray, y: np.ndarray, vertices: List[Tuple[int, int]]) -> np.ndarray:
     """
-    四边形光源区域滤波，只保留指定四边形区域内的事件
-    确保形成真正的四边形而不是自相交图形
+    计算点到多边形边界的最短距离（带符号）
+    内部为负，外部为正
+    
+    Args:
+        x: 点的X坐标数组
+        y: 点的Y坐标数组
+        vertices: 多边形顶点列表，已按顺序排列
+        
+    Returns:
+        到边界的带符号距离数组
+    """
+    n = len(vertices)
+    min_distances = np.full(len(x), np.inf)
+    
+    # 计算到每条边的距离
+    for i in range(n):
+        p1x, p1y = vertices[i]
+        p2x, p2y = vertices[(i + 1) % n]
+        
+        # 计算点到线段的距离
+        # 向量 AB = (p2x - p1x, p2y - p1y)
+        # 向量 AP = (x - p1x, y - p1y)
+        
+        ab_x = p2x - p1x
+        ab_y = p2y - p1y
+        ap_x = x - p1x
+        ap_y = y - p1y
+        
+        # 计算投影参数 t
+        ab_squared = ab_x * ab_x + ab_y * ab_y
+        if ab_squared == 0:  # 退化为点
+            distance = np.sqrt((x - p1x) ** 2 + (y - p1y) ** 2)
+        else:
+            t = (ap_x * ab_x + ap_y * ab_y) / ab_squared
+            t = np.clip(t, 0, 1)  # 限制在线段范围内
+            
+            # 计算最近点
+            closest_x = p1x + t * ab_x
+            closest_y = p1y + t * ab_y
+            
+            # 计算距离
+            distance = np.sqrt((x - closest_x) ** 2 + (y - closest_y) ** 2)
+        
+        # 更新最小距离
+        min_distances = np.minimum(min_distances, distance)
+    
+    # 确定内外部符号
+    inside_mask = point_in_quadrilateral(x, y, vertices)
+    signed_distances = np.where(inside_mask, -min_distances, min_distances)
+    
+    return signed_distances
+
+def filter_light_source_quadrilateral_smooth(events: Dict, vertices: List[Tuple[int, int]] = None, 
+                                           transition_pixels: int = 50) -> Dict[str, np.ndarray]:
+    """
+    四边形光源区域平滑滤波，在边界处实现平滑过渡
+    四边形内部完全保留，边界外逐渐增加滤除概率，50像素外完全滤除
     
     Args:
         events: 原始事件数据
         vertices: 四边形顶点列表，默认使用redandfull组的四边形顶点
+        transition_pixels: 平滑过渡的像素范围 (默认50像素)
     
     Returns:
-        滤波后的事件数据，只包含四边形区域内的事件
+        滤波后的事件数据，包含平滑过渡效果
     """
     if vertices is None:
-        # 使用更新后的redandfull组四边形顶点
-        vertices = [(580, 300), (800, 300), (540, 490), (735, 510)]
+        # 使用收缩后的redandfull组四边形顶点（整体向内收缩约20像素）
+        vertices = [(600, 320), (780, 320), (560, 470), (715, 490)]
     
     if len(vertices) != 4:
         raise ValueError("必须提供4个顶点来定义四边形")
@@ -274,73 +330,30 @@ def filter_light_source_quadrilateral(events: Dict, vertices: List[Tuple[int, in
     x = events['x']
     y = events['y']
     
-    # 使用专门的四边形判断函数
-    quadrilateral_mask = point_in_quadrilateral(x, y, vertices)
-    
-    filtered_events = {
-        'x': x[quadrilateral_mask],
-        'y': y[quadrilateral_mask],
-        'p': events['p'][quadrilateral_mask],
-        't': events['t'][quadrilateral_mask],
-        'sensor_size': events['sensor_size']
-    }
-    
-    original_count = len(events['x'])
-    filtered_count = len(filtered_events['x'])
-    filter_ratio = filtered_count / original_count if original_count > 0 else 0
-    
-    # 显示排序后的顶点顺序
+    # 确保顶点按正确顺序排列
     sorted_vertices = sort_vertices_clockwise(vertices)
     
-    print(f"Light source quadrilateral filtering:")
-    print(f"  Original vertices: {vertices}")
-    print(f"  Sorted vertices (clockwise): {sorted_vertices}")
-    print(f"  {original_count} → {filtered_count} events ({filter_ratio:.3%} retained)")
+    # 计算每个点到四边形边界的带符号距离
+    distances = distance_to_polygon(x, y, sorted_vertices)
     
-    # 计算四边形边界框用于显示
-    xs = [v[0] for v in vertices]
-    ys = [v[1] for v in vertices] 
-    x_min, x_max = min(xs), max(xs)
-    y_min, y_max = min(ys), max(ys)
-    print(f"  Bounding box: x[{x_min}:{x_max}], y[{y_min}:{y_max}]")
-    print(f"  Quadrilateral edges:")
-    for i in range(4):
-        p1 = sorted_vertices[i]
-        p2 = sorted_vertices[(i + 1) % 4]
-        print(f"    Edge {i+1}: {p1} → {p2}")
+    # 计算保留概率
+    # 内部（距离<0）：完全保留（概率=1）
+    # 边界到transition_pixels：线性递减（概率从1降到0）
+    # 外部（距离>transition_pixels）：完全滤除（概率=0）
     
-    return filtered_events
-
-def filter_flare_boundaries(events: Dict, left_boundary: int = 335, right_boundary: int = 910, top_boundary: int = 255) -> Dict[str, np.ndarray]:
-    """
-    炫光数据边界滤除，移除两个不相连的矩形区域：
-    1. 左侧矩形：x < left_boundary 的所有区域
-    2. 右上角矩形：x > right_boundary AND y < top_boundary 的区域
+    probabilities = np.ones(len(distances))
     
-    保留的区域形状为不规则图形：
-    - x >= left_boundary 的区域，但要排除右上角的矩形
+    # 在过渡区域应用线性递减
+    transition_mask = (distances >= 0) & (distances <= transition_pixels)
+    probabilities[transition_mask] = 1.0 - (distances[transition_mask] / transition_pixels)
     
-    Args:
-        events: 原始炫光事件数据
-        left_boundary: 左边界，移除 x < left_boundary 的事件 (默认335)
-        right_boundary: 右边界，移除 x > right_boundary AND y < top_boundary 的事件 (默认910)
-        top_boundary: 上边界，移除 x > right_boundary AND y < top_boundary 的事件 (默认255)
+    # 外部区域完全滤除
+    outer_mask = distances > transition_pixels
+    probabilities[outer_mask] = 0.0
     
-    Returns:
-        滤波后的事件数据，移除了两个矩形区域的事件
-    """
-    x = events['x']
-    y = events['y']
-    
-    # 定义要移除的两个矩形区域
-    # 区域1：左侧矩形 - x < left_boundary 的所有区域
-    remove_left_rect = (x < left_boundary)
-    
-    # 区域2：右上角矩形 - x > right_boundary AND y < top_boundary
-    remove_right_top_rect = (x > right_boundary) & (y < top_boundary)
-    
-    # 保留区域的mask：不在任何移除区域内的事件
-    keep_mask = ~(remove_left_rect | remove_right_top_rect)
+    # 根据概率随机决定保留哪些事件
+    random_values = np.random.random(len(probabilities))
+    keep_mask = random_values < probabilities
     
     filtered_events = {
         'x': x[keep_mask],
@@ -354,18 +367,178 @@ def filter_flare_boundaries(events: Dict, left_boundary: int = 335, right_bounda
     filtered_count = len(filtered_events['x'])
     filter_ratio = filtered_count / original_count if original_count > 0 else 0
     
-    # 统计被移除的事件分布
-    removed_left_rect = np.sum(remove_left_rect)
-    removed_right_top_rect = np.sum(remove_right_top_rect)
-    total_removed = original_count - filtered_count
+    # 统计不同区域的事件数量
+    inside_count = np.sum(distances < 0)
+    transition_count = np.sum(transition_mask)
+    outside_count = np.sum(outer_mask)
+    kept_transition = np.sum(keep_mask & transition_mask)
     
-    print(f"Flare boundary filtering (removing two separate rectangular regions):")
-    print(f"  Removed region 1 - Left rectangle: x < {left_boundary} ({removed_left_rect} events)")
-    print(f"  Removed region 2 - Right-top rectangle: x > {right_boundary} AND y < {top_boundary} ({removed_right_top_rect} events)")
-    print(f"  Keep region shape: Irregular (x >= {left_boundary}, excluding right-top rectangle)")
-    print(f"  {original_count} → {filtered_count} events ({filter_ratio:.3%} retained, {total_removed} total removed)")
+    print(f"Light source quadrilateral smooth filtering:")
+    print(f"  Original vertices: {vertices}")
+    print(f"  Sorted vertices (clockwise): {sorted_vertices}")
+    print(f"  Transition zone: {transition_pixels} pixels")
+    print(f"  Event distribution:")
+    print(f"    Inside (fully kept): {inside_count}")
+    print(f"    Transition zone: {transition_count} → {kept_transition} kept ({kept_transition/transition_count:.1%} avg retention)" if transition_count > 0 else "    Transition zone: 0")
+    print(f"    Outside (fully removed): {outside_count}")
+    print(f"  {original_count} → {filtered_count} events ({filter_ratio:.3%} retained)")
+    
+    # 计算四边形边界框用于显示
+    xs = [v[0] for v in vertices]
+    ys = [v[1] for v in vertices] 
+    x_min, x_max = min(xs), max(xs)
+    y_min, y_max = min(ys), max(ys)
+    print(f"  Bounding box: x[{x_min}:{x_max}], y[{y_min}:{y_max}]")
     
     return filtered_events
+
+def distance_to_flare_boundaries(x: np.ndarray, y: np.ndarray, left_boundary: int = 335, 
+                                right_boundary: int = 910, top_boundary: int = 255) -> np.ndarray:
+    """
+    计算点到炫光边界滤除区域的距离
+    返回正值表示在要被移除的区域内，负值表示在保留区域内
+    
+    Args:
+        x: 点的X坐标数组
+        y: 点的Y坐标数组
+        left_boundary: 左边界
+        right_boundary: 右边界  
+        top_boundary: 上边界
+        
+    Returns:
+        到边界的带符号距离数组，正值=在移除区域内，负值=在保留区域内
+    """
+    # 计算到左侧边界的距离（左侧矩形）
+    left_distance = left_boundary - x  # x < left_boundary 时为正（要移除）
+    
+    # 计算到右上角矩形边界的距离
+    # 右上角矩形定义：x > right_boundary AND y < top_boundary
+    right_distance = x - right_boundary  # x > right_boundary 时为正
+    top_distance = top_boundary - y      # y < top_boundary 时为正
+    
+    # 右上角矩形的距离：只有当同时满足两个条件时才在移除区域内
+    right_top_in_remove = (x > right_boundary) & (y < top_boundary)
+    right_top_distance = np.where(right_top_in_remove, 
+                                  np.maximum(right_distance, top_distance),  # 取最大距离
+                                  -np.inf)  # 不在右上角矩形内
+    
+    # 综合距离：取两个移除区域中距离更近的那个
+    # 如果在左侧移除区域内，距离为left_distance
+    # 如果在右上角移除区域内，距离为right_top_distance
+    # 否则在保留区域内，距离为负值
+    
+    in_left_remove = (x < left_boundary)
+    in_right_top_remove = right_top_in_remove
+    
+    distances = np.full(len(x), -np.inf)  # 默认在保留区域内（负值）
+    
+    # 在左侧移除区域内
+    distances[in_left_remove] = left_distance[in_left_remove]
+    
+    # 在右上角移除区域内
+    distances[in_right_top_remove] = right_top_distance[in_right_top_remove]
+    
+    # 对于保留区域的点，计算到最近边界的负距离
+    in_keep_region = ~(in_left_remove | in_right_top_remove)
+    if np.any(in_keep_region):
+        # 计算保留区域内的点到边界的距离（负值）
+        keep_x = x[in_keep_region]
+        keep_y = y[in_keep_region]
+        
+        # 到左边界的距离
+        dist_to_left = keep_x - left_boundary  # 正值，但要转为负值
+        
+        # 到右上角区域边界的距离
+        dist_to_right_boundary = right_boundary - keep_x
+        dist_to_top_boundary = keep_y - top_boundary
+        
+        # 对于右上角区域，计算到边界的最小距离
+        dist_to_right_top = np.where((keep_x <= right_boundary) | (keep_y >= top_boundary),
+                                    np.minimum(np.maximum(dist_to_right_boundary, 0), 
+                                             np.maximum(dist_to_top_boundary, 0)),
+                                    0)
+        
+        # 取到各个边界的最小距离，转为负值
+        min_dist_to_boundary = np.minimum(dist_to_left, dist_to_right_top)
+        distances[in_keep_region] = -min_dist_to_boundary
+    
+    return distances
+
+def filter_flare_boundaries_smooth(events: Dict, left_boundary: int = 335, right_boundary: int = 910, 
+                                 top_boundary: int = 255, transition_pixels: int = 50) -> Dict[str, np.ndarray]:
+    """
+    炫光数据边界平滑滤除，在边界处实现平滑过渡
+    移除两个不相连的矩形区域，但边界处有50像素的平滑过渡
+    
+    Args:
+        events: 原始炫光事件数据
+        left_boundary: 左边界，移除 x < left_boundary 的事件 (默认335)
+        right_boundary: 右边界，移除 x > right_boundary AND y < top_boundary 的事件 (默认910)
+        top_boundary: 上边界，移除 x > right_boundary AND y < top_boundary 的事件 (默认255)
+        transition_pixels: 平滑过渡的像素范围 (默认50像素)
+    
+    Returns:
+        滤波后的事件数据，包含平滑过渡效果
+    """
+    x = events['x']
+    y = events['y']
+    
+    # 计算每个点到移除区域边界的带符号距离
+    distances = distance_to_flare_boundaries(x, y, left_boundary, right_boundary, top_boundary)
+    
+    # 计算移除概率
+    # 深入移除区域（距离>transition_pixels）：完全移除（概率=1）
+    # 边界到transition_pixels：线性递增移除概率（概率从0增到1）
+    # 保留区域（距离<0）：完全保留（概率=0）
+    
+    removal_probabilities = np.zeros(len(distances))
+    
+    # 在过渡区域应用线性递增的移除概率
+    transition_mask = (distances >= 0) & (distances <= transition_pixels)
+    removal_probabilities[transition_mask] = distances[transition_mask] / transition_pixels
+    
+    # 深入移除区域完全移除
+    deep_remove_mask = distances > transition_pixels
+    removal_probabilities[deep_remove_mask] = 1.0
+    
+    # 根据概率随机决定移除哪些事件
+    random_values = np.random.random(len(removal_probabilities))
+    keep_mask = random_values >= removal_probabilities  # 保留概率 = 1 - 移除概率
+    
+    filtered_events = {
+        'x': x[keep_mask],
+        'y': y[keep_mask],
+        'p': events['p'][keep_mask],
+        't': events['t'][keep_mask],
+        'sensor_size': events['sensor_size']
+    }
+    
+    original_count = len(events['x'])
+    filtered_count = len(filtered_events['x'])
+    filter_ratio = filtered_count / original_count if original_count > 0 else 0
+    
+    # 统计不同区域的事件数量
+    keep_region_count = np.sum(distances < 0)
+    transition_count = np.sum(transition_mask)
+    deep_remove_count = np.sum(deep_remove_mask)
+    kept_transition = np.sum(keep_mask & transition_mask)
+    
+    print(f"Flare boundary smooth filtering:")
+    print(f"  Boundaries: left x<{left_boundary}, right-top x>{right_boundary}&y<{top_boundary}")
+    print(f"  Transition zone: {transition_pixels} pixels")
+    print(f"  Event distribution:")
+    print(f"    Keep region (fully retained): {keep_region_count}")
+    print(f"    Transition zone: {transition_count} → {kept_transition} kept ({kept_transition/transition_count:.1%} avg retention)" if transition_count > 0 else "    Transition zone: 0")
+    print(f"    Deep remove region (fully removed): {deep_remove_count}")
+    print(f"  {original_count} → {filtered_count} events ({filter_ratio:.3%} retained)")
+    
+    return filtered_events
+
+def filter_flare_boundaries(events: Dict, left_boundary: int = 335, right_boundary: int = 910, top_boundary: int = 255) -> Dict[str, np.ndarray]:
+    """
+    炫光数据边界滤除，移除两个不相连的矩形区域（硬边界版本，向后兼容）
+    """
+    return filter_flare_boundaries_smooth(events, left_boundary, right_boundary, top_boundary, transition_pixels=0)
 
 def add_noise_to_filtered_regions(events: Dict, filtered_mask: np.ndarray, num_noise_events: int = 1000000, 
                                  sensor_size: Tuple[int, int] = (1280, 720)) -> Dict[str, np.ndarray]:
@@ -670,28 +843,30 @@ def main():
     print(f"NoFlare vs RandomFlare overlap: {overlap_start_random:.6f}s - {overlap_end_random:.6f}s ({overlap_end_random - overlap_start_random:.3f}s)")
     print("Will use NoFlare as baseline and align each flare type separately during processing")
     
-    # 先对noFlare数据应用四边形光源滤波（统一在时间采样前做）
-    print("\n=== Applying Quadrilateral Light Source Filtering to NoFlare Data ===")
-    # 使用更新的四边形顶点：(580,300), (800,300), (540,490), (735,510)
-    quadrilateral_vertices = [(580, 300), (800, 300), (540, 490), (735, 510)]
-    noflare_events = filter_light_source_quadrilateral(noflare_events, vertices=quadrilateral_vertices)
+    # 先对noFlare数据应用四边形光源平滑滤波（统一在时间采样前做）
+    print("\n=== Applying Quadrilateral Light Source Smooth Filtering to NoFlare Data ===")
+    # 使用收缩后的四边形顶点：(600,320), (780,320), (560,470), (715,490)
+    # 整体向内收缩约20像素，50像素平滑过渡区域
+    quadrilateral_vertices = [(600, 320), (780, 320), (560, 470), (715, 490)]
+    noflare_events = filter_light_source_quadrilateral_smooth(noflare_events, vertices=quadrilateral_vertices, transition_pixels=50)
     
     # 添加时空随机噪声（100万个，10倍增加）
     print("\n=== Adding Spatiotemporal Noise to NoFlare Data (10x increase) ===")
     noflare_events = add_spatiotemporal_noise(noflare_events, num_noise_events=1000000, 
                                             sensor_size=noflare_events['sensor_size'])
     
-    # 对两种炫光数据应用相同的边界滤除和噪声增强
-    print("\n=== Applying Boundary Filtering to SixFlare Data ===")
+    # 对两种炫光数据应用相同的平滑边界滤除和噪声增强
+    print("\n=== Applying Smooth Boundary Filtering to SixFlare Data ===")
     # 移除两个矩形区域：1) x<335的左侧区域  2) x>910且y<255的右上角区域
-    sixflare_events = filter_flare_boundaries(sixflare_events, left_boundary=335, right_boundary=910, top_boundary=255)
+    # 50像素平滑过渡区域
+    sixflare_events = filter_flare_boundaries_smooth(sixflare_events, left_boundary=335, right_boundary=910, top_boundary=255, transition_pixels=50)
     
     print("\n=== Adding Spatiotemporal Noise to SixFlare Data (10x increase) ===")
     sixflare_events = add_spatiotemporal_noise(sixflare_events, num_noise_events=1000000,
                                              sensor_size=sixflare_events['sensor_size'])
     
-    print("\n=== Applying Boundary Filtering to RandomFlare Data ===")
-    randomflare_events = filter_flare_boundaries(randomflare_events, left_boundary=335, right_boundary=910, top_boundary=255)
+    print("\n=== Applying Smooth Boundary Filtering to RandomFlare Data ===")
+    randomflare_events = filter_flare_boundaries_smooth(randomflare_events, left_boundary=335, right_boundary=910, top_boundary=255, transition_pixels=50)
     
     print("\n=== Adding Spatiotemporal Noise to RandomFlare Data (10x increase) ===")
     randomflare_events = add_spatiotemporal_noise(randomflare_events, num_noise_events=1000000,
@@ -758,8 +933,8 @@ def main():
     print(f"Format: DSEC-compatible HDF5")
     print(f"Resolution: 640×480")
     print(f"Duration per sample: 100ms")
-    print(f"NoFlare processing: Quadrilateral region vertices[(580,300),(800,300),(540,490),(735,510)] + 1M noise events")
-    print(f"Flare processing: Remove left(x<335) + right-top(x>910&y<255) rectangles + 1M noise events each")
+    print(f"NoFlare processing: Smooth quadrilateral vertices[(600,320),(780,320),(560,470),(715,490)] + 50px transition + 1M noise events")
+    print(f"Flare processing: Smooth remove left(x<335) + right-top(x>910&y<255) + 50px transitions + 1M noise events each")
     print(f"Data sources: SixFlare + RandomFlare (same boundary filtering applied to both)")
 
 if __name__ == "__main__":
