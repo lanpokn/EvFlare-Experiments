@@ -494,24 +494,32 @@ python evaluate_all_methods.py --metrics chamfer_distance my_voxel_metric
 ### EVK4数据集生成器
 #### **通用版本**: `generate_evk4_dataset_from_npy.py`
 #### **Defocus专版**: `generate_defocus_dataset.py` (独立defocus处理脚本) ✅
+#### **RedAndFull专版**: `generate_redandfull_dataset.py` (独立redandfull处理脚本，支持双炫光源) ✅
 
 #### **核心功能** (最新更新 ✅):
 - **数据源**: 支持多种炫光类型配置
   - **Defocus组**: `full_noFlare_part_defocus` + `full_sixFlare_part_defocus` (当前使用)
-  - **Redandfull组**: `redandfull_noFlare_part` + `redandfull_randomFlare_part` (历史版本)
-- **🎯 光源滤波**: **圆形区域滤波** - 只保留光源附近事件
-  - **圆心坐标**: (600,210) - defocus组光源位置(已校正)
-  - **滤波半径**: 30像素(适中大小)
-  - **应用时机**: 裁剪前统一对noFlare数据滤波
-  - **✅ 滤波效果**: 精确聚焦光源核心区域，预期保留率~1.8%
+  - **RedAndFull组**: `redandfull_noFlare_part` + `redandfull_sixFlare_part` + `redandfull_randomFlare_part` (双炫光源)
+- **🎯 光源滤波**: **多种滤波策略** - 根据数据组选择
+  - **Defocus组**: 圆形区域滤波，圆心(600,210)，半径30px，应用于noFlare数据
+  - **RedAndFull组**: 四边形区域滤波，顶点[(610,341),(742,351),(562,456),(715,181)]，应用于noFlare数据
+  - **✅ 滤波效果**: Defocus精确聚焦光源核心区域~1.8%，RedAndFull保留任意四边形光源区域
 - **🎯 噪声增强**: **时空随机噪声添加** - 增强数据鲁棒性
   - **噪声数量**: 10万个随机事件
   - **时间分布**: 在原始数据时间范围内均匀分布
   - **空间分布**: 在整个1280×720传感器区域内均匀分布
   - **极性分布**: 随机选择-1或+1极性
   - **应用时机**: 光源滤波后，时间采样前
+- **🎯 炫光边界滤除**: **RedAndFull组特有** - 移除炫光数据的边界区域
+  - **移除区域**: 两个不相连的矩形区域
+    - 左侧矩形: x < 335 的所有区域
+    - 右上角矩形: x > 910 AND y < 255 的区域
+  - **保留形状**: 不规则L形区域，避免简单矩形
+  - **应用对象**: sixFlare和randomFlare数据
 - **🎯 极性对齐**: 基于正极性占比的最优时间对齐，分析四个2.5ms时间窗口的极性分布  
-- **时间采样**: 生成10对100ms数据，均匀分布在整个时间范围内
+- **时间采样**: 
+  - **Defocus组**: 生成10对100ms数据，均匀分布在整个时间范围内
+  - **RedAndFull组**: 生成20对100ms数据，前10个用sixFlare，后10个用randomFlare
 - **🔄 不同裁剪**: 每对数据使用不同的随机裁剪区域(crop_seed=sample_id*42)，X±320px，Y±120px
 - **序号管理**: 从1开始编号
 - **空间重映射**: 1280×720→640×480，保持中心区域，避免过拟合
@@ -544,18 +552,33 @@ python evaluate_all_methods.py --metrics chamfer_distance my_voxel_metric
 
 ### 使用指南
 
-#### **Defocus专用脚本（推荐）**
+#### **Defocus专用脚本**
 ```bash
 # 1. 在Windows evreal环境中生成NPY文件
 # 2. 在Linux环境中运行defocus专用生成器
 python3 generate_defocus_dataset.py
 
 # 特点:
-# - 专门针对defocus组数据优化
-# - 固化光源滤波参数 (600,210), 半径30px
-# - 固化噪声增强 10万个随机事件
+# - 数据源: full_noFlare_part_defocus + full_sixFlare_part_defocus
+# - 圆形光源滤波: 圆心(600,210), 半径30px
+# - 固化噪声增强: 10万个随机事件
 # - 生成10对样本，编号1-10
 # - 输出目录: evk4_defocus_dataset_dsec_format_from_npy/
+```
+
+#### **RedAndFull专用脚本** ✅
+```bash
+# RedAndFull组数据生成器（双炫光源）
+python3 generate_redandfull_dataset.py
+
+# 特点:
+# - 数据源: redandfull_noFlare_part + redandfull_sixFlare_part + redandfull_randomFlare_part
+# - NoFlare处理: 四边形光源滤波，顶点[(610,341),(742,351),(562,456),(715,181)] + 10万噪声事件
+# - 炫光处理: 边界滤除(移除左侧x<335 + 右上角x>910&y<255) + 各10万噪声事件
+# - 生成20对样本: 前10个sixFlare(样本1-10) + 后10个randomFlare(样本11-20)
+# - 时间对齐: NoFlare作为基准，分别与两种炫光数据对齐
+# - 输出目录: evk4_redandfull_dataset_dsec_format_from_npy/
+# - 文件命名: 包含炫光类型前缀(sixflare/randomflare)
 ```
 
 #### **通用版本脚本**
@@ -572,14 +595,20 @@ python3 generate_evk4_dataset_from_npy.py
 
 #### **输出目录结构**
 ```
+# Defocus组
 evk4_defocus_dataset_dsec_format_from_npy/
 ├── input/   (带炫光数据: defocus_XXXms_sampleY.h5)
 └── target/  (干净数据: defocus_XXXms_sampleY.h5)
+
+# RedAndFull组（双炫光源）
+evk4_redandfull_dataset_dsec_format_from_npy/
+├── input/   (带炫光数据: redandfull_sixflare_XXXms_sampleY.h5, redandfull_randomflare_XXXms_sampleY.h5)
+└── target/  (干净数据: redandfull_sixflare_XXXms_sampleY.h5, redandfull_randomflare_XXXms_sampleY.h5)
 ```
 
 ### 数据源配置示例
 ```python
-# 最新配置: Defocus组 + 光源滤波, 生成sample1-10
+# Defocus组配置: 圆形光源滤波, 生成sample1-10
 noflare_npy_folder = "Datasets/EVK4/full_noFlare_part_defocus"
 sixflare_npy_folder = "Datasets/EVK4/full_sixFlare_part_defocus"
 # 光源滤波: 圆心(600,210)，半径30px，应用于noFlare数据
@@ -588,6 +617,20 @@ noflare_events = filter_light_source_circular(noflare_events, center_x=600, cent
 noflare_events = add_spatiotemporal_noise(noflare_events, num_noise_events=100000)
 sample_starts = generate_random_sample_times(overlap_start, overlap_end, num_samples=10)
 sample_id = i + 1  # 序号1-10
+
+# RedAndFull组配置: 四边形光源滤波 + 炫光边界滤除, 生成sample1-20
+noflare_npy_folder = "Datasets/EVK4/redandfull_noFlare_part"
+sixflare_npy_folder = "Datasets/EVK4/redandfull_sixFlare_part"
+randomflare_npy_folder = "Datasets/EVK4/redandfull_randomFlare_part"
+# 光源滤波: 四边形顶点[(610,341),(742,351),(562,456),(715,181)]，应用于noFlare数据
+polygon_vertices = [(610, 341), (742, 351), (562, 456), (715, 181)]
+noflare_events = filter_light_source_polygon(noflare_events, vertices=polygon_vertices)
+# 炫光边界滤除: 移除左侧x<335 + 右上角x>910&y<255，应用于炫光数据
+sixflare_events = filter_flare_boundaries(sixflare_events, left_boundary=335, right_boundary=910, top_boundary=255)
+randomflare_events = filter_flare_boundaries(randomflare_events, left_boundary=335, right_boundary=910, top_boundary=255)
+# 噪声增强: 三个数据源各添加10万个随机事件
+sample_starts = generate_random_sample_times(noflare_start, noflare_end, num_samples=20)
+sample_id = i + 1  # 序号1-20, 前10个sixFlare后10个randomFlare
 ```
 
 ### Defocus数据集生成结果 ✅
