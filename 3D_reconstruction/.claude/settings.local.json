@@ -22,7 +22,8 @@
       "Bash(conda remove:*)",
       "Bash(conda create:*)",
       "Bash(conda info:*)",
-      "Bash(mv:*)"
+      "Bash(mv:*)",
+      "Bash(cat:*)"
     ],
     "deny": []
   }

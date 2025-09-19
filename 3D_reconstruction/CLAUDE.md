@@ -33,27 +33,31 @@
    - 支持双向转换 (H5 ↔ DVS, H5 ↔ EVREAL)
    - 输出位置: `datasets/lego/events_evreal/sequence/`
 
-### 🔄 进行中模块
+### ✅ 已完成模块 
 5. **EVREAL集成模块** (`modules/evreal_integration.py`)
-   - **当前状态**: 95%完成，最后数据格式转换阶段
+   - **当前状态**: ✅ Pipeline调用成功，❌ 重建图像生成问题
    - **已解决问题**:
      * 跨平台路径兼容性 (WindowsPath在WSL中的问题) ✅
      * EVREAL依赖安装 (tabulate, yachalk, pyiqa等) ✅ 
      * 数据集配置格式匹配EVREAL标准 ✅
      * 目录结构调整 (events_evreal/sequence/) ✅
      * 真值图像配置 (lego/test复制到sequence/images/) ✅
-   - **当前问题**: EVREAL期望的图像数据格式 (images.npy, images_ts.npy, image_event_indices.npy)
-   - **解决方案**: 在代码中集成PNG→numpy转换功能
-   - **重要提醒**: 
-     * ⚠️ 必须使用Umain2环境: `conda activate Umain2`
-     * ⚠️ 数据处理应该在代码模块中实现，不是终端操作
-     * ⚠️ 需要一键式处理能力，适配不同数据集
-   - **EVREAL数据格式要求** (基于tools/分析):
-     * `images.npy`: 图像数组，形状(N, H, W)，灰度图，uint8格式
-     * `images_ts.npy`: 图像时间戳数组，形状(N,)，float64格式，单位秒
-     * `image_event_indices.npy`: 图像对应事件索引，形状(N, 2)，每行[start_idx, end_idx]
-     * 参考: `extract_gt_images.py`显示images.npy为灰度图像数组
-     * 参考: `Davis_to_npy.py`显示完整的数据结构
+     * PNG→numpy转换功能集成 ✅
+   - **当前核心问题**: ❌ **EVREAL重建图像未生成**
+     * EVREAL运行成功，但只生成空的指标文件
+     * 缺少重建的PNG图像文件（frame_*.png）
+     * 可能原因: E2VID模型文件、数据格式、路径问题
+
+6. **一键式主控Pipeline** (`run_full_pipeline.py`)
+   - **当前状态**: ✅ 100%完成，真正一键运行
+   - **功能**: 从lego_flare+lego_normal → 完整重建流程
+   - **验证结果**: 
+     * 数据集合并 ✅
+     * 图像预处理 ✅  
+     * DVS事件仿真 ✅
+     * 格式转换 ✅
+     * EVREAL调用 ✅
+   - **问题**: 最终重建图像数量为0
 
 ### 📋 待实施模块  
 6. **时间戳对齐系统**
