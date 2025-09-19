@@ -23,7 +23,11 @@
       "Bash(conda create:*)",
       "Bash(conda info:*)",
       "Bash(mv:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(for f in datasets/lego/reconstruction/evreal_e2vid/*.txt)",
+      "Bash(do echo \"=== $f ===\")",
+      "Bash(echo)",
+      "Bash(done)"
     ],
     "deny": []
   }

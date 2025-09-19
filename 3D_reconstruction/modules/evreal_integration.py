@@ -96,8 +96,8 @@ class EVREALDatasetManager:
             height, width = first_img.shape[:2]
             print(f"图像尺寸: {width}x{height}")
             
-            # 创建图像数组（EVREAL标准：灰度图）
-            images = np.zeros((num_images, height, width), dtype=np.uint8)
+            # 创建图像数组（EVREAL标准：RGB格式以匹配真值图像）
+            images = np.zeros((num_images, height, width, 3), dtype=np.uint8)
             
             for i, png_file in enumerate(png_files):
                 img = cv2.imread(str(png_file))
@@ -105,9 +105,9 @@ class EVREALDatasetManager:
                     print(f"警告：无法读取 {png_file}")
                     continue
                 
-                # BGR转灰度
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                images[i] = gray
+                # BGR转RGB
+                rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                images[i] = rgb
                 
                 if i % 50 == 0:
                     print(f"  进度: {i+1}/{num_images}")
@@ -246,6 +246,14 @@ class EVREALRunner:
                 # 激活Umain2环境并运行EVREAL
                 env_cmd = f"source ~/miniconda3/etc/profile.d/conda.sh && conda activate Umain2 && {' '.join(cmd)}"
                 
+                print(f"🚀 DEBUG: 完整执行命令: {env_cmd}")
+                print(f"🚀 DEBUG: 工作目录: {self.config.evreal_path}")
+                print(f"🚀 DEBUG: EVREAL路径存在: {self.config.evreal_path.exists()}")
+                
+                # 检查eval.py是否存在
+                eval_script = self.config.evreal_path / "eval.py"
+                print(f"🚀 DEBUG: eval.py存在: {eval_script.exists()}")
+                
                 result = subprocess.run(
                     ["bash", "-c", env_cmd],
                     cwd=self.config.evreal_path,
@@ -254,13 +262,29 @@ class EVREALRunner:
                     timeout=600  # 10分钟超时
                 )
                 
+                print(f"🚀 DEBUG: 返回码: {result.returncode}")
+                print(f"🚀 DEBUG: stdout长度: {len(result.stdout) if result.stdout else 0}")
+                print(f"🚀 DEBUG: stderr长度: {len(result.stderr) if result.stderr else 0}")
+                
                 if result.returncode == 0:
-                    print(f"✅ {method} 重建成功")
+                    print(f"✅ {method} 重建命令执行成功")
+                    print(f"🚀 DEBUG: stdout内容:")
+                    print(result.stdout)
+                    
+                    # 检查是否真的生成了输出文件
+                    outputs_dir = self.config.evreal_path / "outputs"
+                    print(f"🚀 DEBUG: outputs目录存在: {outputs_dir.exists()}")
+                    if outputs_dir.exists():
+                        output_contents = list(outputs_dir.glob("*"))
+                        print(f"🚀 DEBUG: outputs目录内容: {[p.name for p in output_contents]}")
+                    
                     results[method] = True
                 else:
-                    print(f"❌ {method} 重建失败:")
-                    print(f"stdout: {result.stdout}")
-                    print(f"stderr: {result.stderr}")
+                    print(f"❌ {method} 重建失败 (返回码: {result.returncode}):")
+                    print(f"🚀 DEBUG: 完整stdout:")
+                    print(result.stdout)
+                    print(f"🚀 DEBUG: 完整stderr:")
+                    print(result.stderr)
                     results[method] = False
                     
             except subprocess.TimeoutExpired:
@@ -306,11 +330,29 @@ class EVREALRunner:
                         evreal_output_dir = direct_path
                 
                 if evreal_output_dir is None or not evreal_output_dir.exists():
-                    # 列出可能的输出目录供调试
-                    available_dirs = list(outputs_base.glob("*/"))
-                    print(f"警告：找不到 {method} 的输出目录")
-                    print(f"  预期路径: outputs/{self.config.eval_config}/{self.config.dataset_name}/sequence/{method}")
-                    print(f"  可用目录: {[d.name for d in available_dirs]}")
+                    # 详细调试输出目录结构
+                    print(f"❌ 找不到 {method} 的输出目录")
+                    print(f"🚀 DEBUG: 预期路径: outputs/{self.config.eval_config}/{self.config.dataset_name}/sequence/{method}")
+                    print(f"🚀 DEBUG: outputs_base存在: {outputs_base.exists()}")
+                    
+                    if outputs_base.exists():
+                        available_dirs = list(outputs_base.glob("*/"))
+                        print(f"🚀 DEBUG: 可用目录: {[d.name for d in available_dirs]}")
+                        
+                        # 递归查看目录结构
+                        for dataset_dir in available_dirs:
+                            if dataset_dir.is_dir():
+                                print(f"🚀 DEBUG: 检查目录 {dataset_dir.name}:")
+                                subdirs = list(dataset_dir.glob("*"))
+                                print(f"  子目录: {[s.name for s in subdirs if s.is_dir()]}")
+                                
+                                # 检查sequence目录
+                                seq_dir = dataset_dir / "sequence"
+                                if seq_dir.exists():
+                                    seq_contents = list(seq_dir.glob("*"))
+                                    print(f"  sequence内容: {[s.name for s in seq_contents]}")
+                    else:
+                        print(f"🚀 DEBUG: outputs目录不存在: {outputs_base}")
                     continue
                     
                 # 目标目录
@@ -320,6 +362,7 @@ class EVREALRunner:
                 if target_dir.exists():
                     shutil.rmtree(target_dir)
                 shutil.copytree(evreal_output_dir, target_dir)
+                
                 
                 copied_results[method] = target_dir
                 print(f"✅ 复制 {method} 结果到: {target_dir}")
@@ -332,6 +375,7 @@ class EVREALRunner:
                 print(f"❌ 复制 {method} 结果时出错: {e}")
                 
         return copied_results
+    
 
 class EVREALIntegration:
     """EVREAL集成主类"""

@@ -149,16 +149,27 @@ class FormatConverter:
     
     @staticmethod
     def dvs_to_evreal(dvs_events: DataFormat.DVSEvents) -> DataFormat.EVREALFormat:
-        """DVS格式转EVREAL格式"""
+        """DVS格式转EVREAL格式
+        DVS-Voltmeter输出格式: [timestamp_us, x, y, polarity]
+        EVREAL期望格式: events_ts(秒), events_xy(x,y), events_p(0/1)
+        """
         events = dvs_events.events
         
-        # 时间戳转换：微秒 → 秒
-        events_ts = events[:, 2] / 1e6
+        # 时间戳转换：微秒 → 秒 (第0列)
+        events_ts = events[:, 0] / 1e6
         
-        # 坐标提取
-        events_xy = events[:, :2].astype(np.int32)
+        # 坐标提取并交换为EVREAL期望的y,x顺序 (第1,2列)
+        # EVREAL使用(ys, xs)索引，所以需要交换顺序
+        # DVS格式是[t, x, y, p]，分析实际坐标范围：
+        # 第2列∈[20,639] 是X坐标 (图像宽度640)  
+        # 第3列∈[0,479] 是Y坐标 (图像高度480)
+        dvs_x = events[:, 1].astype(np.int32)  # DVS X坐标 [20, 639]
+        dvs_y = events[:, 2].astype(np.int32)  # DVS Y坐标 [0, 479]
         
-        # 极性转换
+        # 直接使用DVS的X,Y坐标
+        events_xy = np.column_stack([dvs_x, dvs_y])  # [x, y]顺序
+        
+        # 极性转换 (第3列)
         events_p = events[:, 3].astype(np.int32)
         
         return DataFormat.EVREALFormat(

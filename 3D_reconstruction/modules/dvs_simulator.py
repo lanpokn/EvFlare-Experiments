@@ -231,7 +231,7 @@ class DVSSimulatorWrapper:
         print(f"加载事件文件: {event_file}")
         
         try:
-            # 加载事件数据：格式为 [x, y, timestamp_us, polarity]
+            # 加载事件数据：DVS-Voltmeter实际格式为 [timestamp_us, x, y, polarity]
             events = np.loadtxt(event_file)
             
             if events.size == 0:
@@ -242,7 +242,8 @@ class DVSSimulatorWrapper:
                 events = events.reshape(1, -1)
                 
             print(f"加载了 {events.shape[0]} 个事件")
-            print(f"时间范围: {events[:, 2].min():.0f} - {events[:, 2].max():.0f} μs")
+            print(f"时间范围: {events[:, 0].min():.0f} - {events[:, 0].max():.0f} μs")
+            print(f"空间范围: x[{events[:, 1].min():.0f}, {events[:, 1].max():.0f}] y[{events[:, 2].min():.0f}, {events[:, 2].max():.0f}]")
             print(f"ON事件: {np.sum(events[:, 3] == 1)}, OFF事件: {np.sum(events[:, 3] == 0)}")
             
             # 创建元数据

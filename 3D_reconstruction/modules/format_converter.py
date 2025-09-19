@@ -37,7 +37,7 @@ class ConversionConfig:
     h5_dir: Optional[Path] = None
     
     # 元数据
-    sensor_resolution: Tuple[int, int] = (640, 480)  # (width, height)
+    sensor_resolution: Tuple[int, int] = (480, 640)  # (height, width) - EVREAL要求格式
     
     def __post_init__(self):
         if self.evreal_dir is None:
@@ -68,22 +68,22 @@ class DVSToEVREALConverter:
             if events.ndim == 1:
                 events = events.reshape(1, -1)
                 
-            # 验证事件格式：[x, y, timestamp_us, polarity]
+            # 验证事件格式：[timestamp_us, x, y, polarity]
             if events.shape[1] != 4:
                 print(f"错误：事件格式不正确，期望4列，实际{events.shape[1]}列")
                 return None
                 
             print(f"成功加载 {events.shape[0]} 个事件")
-            print(f"时间范围: {events[:, 2].min():.0f} - {events[:, 2].max():.0f} μs")
-            print(f"空间范围: x[{events[:, 0].min():.0f}, {events[:, 0].max():.0f}] y[{events[:, 1].min():.0f}, {events[:, 1].max():.0f}]")
+            print(f"时间范围: {events[:, 0].min():.0f} - {events[:, 0].max():.0f} μs")
+            print(f"空间范围: x[{events[:, 1].min():.0f}, {events[:, 1].max():.0f}] y[{events[:, 2].min():.0f}, {events[:, 2].max():.0f}]")
             print(f"极性分布: ON={np.sum(events[:, 3] == 1)}, OFF={np.sum(events[:, 3] == 0)}")
             
             metadata = {
                 "num_events": events.shape[0],
-                "time_range_us": (float(events[:, 2].min()), float(events[:, 2].max())),
+                "time_range_us": (float(events[:, 0].min()), float(events[:, 0].max())),
                 "spatial_range": {
-                    "x_range": (int(events[:, 0].min()), int(events[:, 0].max())),
-                    "y_range": (int(events[:, 1].min()), int(events[:, 1].max()))
+                    "x_range": (int(events[:, 1].min()), int(events[:, 1].max())),
+                    "y_range": (int(events[:, 2].min()), int(events[:, 2].max()))
                 },
                 "sensor_resolution": self.config.sensor_resolution,
                 "source_file": str(dvs_file)
