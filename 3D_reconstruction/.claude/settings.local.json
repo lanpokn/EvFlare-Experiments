@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(grep:*)",
+      "Bash(python3:*)",
+      "Bash(python:*)",
+      "Bash(conda activate:*)",
+      "Bash(source:*)",
+      "Bash(pip show:*)",
+      "Bash(pip install:*)",
+      "Bash(mkdir:*)",
+      "Bash(rm:*)",
+      "Bash(cp:*)",
+      "Bash(conda list:*)",
+      "Bash(conda install:*)",
+      "Bash(conda search:*)",
+      "Bash(conda uninstall:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(pip uninstall:*)",
+      "Bash(conda remove:*)",
+      "Bash(conda create:*)",
+      "Bash(conda info:*)",
+      "Bash(mv:*)"
+    ],
+    "deny": []
+  }
+}

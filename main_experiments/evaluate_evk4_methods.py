@@ -132,12 +132,11 @@ def get_sample_pairs_evk4(gt_folder: str, method_folders: List[str], num_samples
     
     samples = []
     for gt_file in gt_files:
-        # Extract sample identifier (e.g., "25ms_sample1" from "defocus_25ms_sample1.h5" or "evk4_25ms_sample1.h5")
-        gt_name = gt_file.stem  # defocus_25ms_sample1 or evk4_25ms_sample1
-        sample_id = gt_name.replace('evk4_', '').replace('defocus_', '')  # 25ms_sample1
+        # Extract sample identifier from full filename
+        gt_name = gt_file.stem  # e.g., defocus_25ms_sample1 or redandfull_sixflare_12ms_sample1
         
         sample_dict = {
-            'sample_id': sample_id,
+            'sample_id': gt_name,  # Use full filename as sample_id
             'gt_file': str(gt_file)
         }
         
@@ -146,14 +145,12 @@ def get_sample_pairs_evk4(gt_folder: str, method_folders: List[str], num_samples
             method_path = Path(method_folder)
             method_name = method_path.name
             
-            # Look for matching file in method folder (try both defocus_ and evk4_ prefixes)
-            method_file_defocus = method_path / f"defocus_{sample_id}.h5"
-            method_file_evk4 = method_path / f"evk4_{sample_id}.h5"
-            method_file = method_file_defocus if method_file_defocus.exists() else method_file_evk4
+            # Look for exact matching filename in method folder
+            method_file = method_path / f"{gt_name}.h5"
             if method_file.exists():
                 sample_dict[f'{method_name}_file'] = str(method_file)
             else:
-                print(f"Warning: Missing {method_name} file for sample {sample_id}")
+                print(f"Warning: Missing {method_name} file for sample {gt_name}")
         
         samples.append(sample_dict)
     

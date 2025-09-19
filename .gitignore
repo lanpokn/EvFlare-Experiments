@@ -1,2 +1,6 @@
 data/
 main_experiments/Datasets
+3D_reconstruction/Datasets
+3D_reconstruction/DVS-Voltmeter-main
+3D_reconstruction/gaussian-splatting
+3D_reconstruction/temp
