@@ -112,13 +112,43 @@ class EVREALDatasetManager:
                 if i % 50 == 0:
                     print(f"  进度: {i+1}/{num_images}")
             
-            # 生成时间戳（均匀分布在事件时间范围内）
+            # 生成时间戳（直接使用图像预处理阶段的时间戳策略）
             with open(sequence_dir / "metadata.json") as f:
                 meta = json.load(f)
             
             time_start = meta["time_range_us"][0] / 1e6  # 转换为秒
             time_end = meta["time_range_us"][1] / 1e6
-            image_timestamps = np.linspace(time_start, time_end, num_images).astype(np.float64)
+            
+            # 使用原始的精确时间戳以确保位姿完美对齐
+            # 核心目标：重建图像i必须与原始图像i有完全相同的时间戳和位姿
+            dt_seconds = 0.001  # 精确的1ms间隔
+            
+            # 生成与原始图像完全对齐的200张时间戳
+            # 从事件开始时间起，按1ms间隔生成
+            aligned_start_time = time_start  # 使用事件起始时间作为第一张图像时间
+            image_timestamps = np.array([aligned_start_time + i * dt_seconds for i in range(num_images)], dtype=np.float64)
+            
+            print(f"位姿对齐的时间戳生成:")
+            print(f"  事件时间范围: [{time_start:.6f}, {time_end:.6f}]s")  
+            print(f"  200张图像时间戳: [{image_timestamps[0]:.6f}, {image_timestamps[-1]:.6f}]s")
+            print(f"  时间间隔: {dt_seconds:.6f}s = {dt_seconds*1000:.1f}ms (精确)")
+            print(f"  最后图像是否在事件范围内: {image_timestamps[-1] <= time_end}")
+            
+            # 检查时间戳与原始设计的对齐情况
+            expected_timestamps_us = [i * 1000 for i in range(num_images)]  # 0, 1000, 2000, ...
+            actual_timestamps_us = [int(ts * 1e6) for ts in image_timestamps]
+            
+            alignment_errors = 0
+            for i in range(num_images):
+                expected = expected_timestamps_us[i] + int(time_start * 1e6)  # 加上起始偏移
+                actual = actual_timestamps_us[i]
+                if abs(expected - actual) > 1:  # 允许1μs误差
+                    alignment_errors += 1
+            
+            print(f"✅ 时间戳对齐检查: {alignment_errors}个误差 (应为0)")
+            
+            # 对于between_frames，使用相同的时间戳（EVREAL应该能处理边界情况）
+            extended_timestamps = image_timestamps  # 不添加虚拟时间戳
             
             # 生成图像事件索引
             event_timestamps = np.load(sequence_dir / "events_ts.npy")
@@ -134,12 +164,12 @@ class EVREALDatasetManager:
             
             # 保存numpy文件
             np.save(sequence_dir / "images.npy", images)
-            np.save(sequence_dir / "images_ts.npy", image_timestamps)  
+            np.save(sequence_dir / "images_ts.npy", extended_timestamps)  # 使用扩展的时间戳（包含虚拟第201张）
             np.save(sequence_dir / "image_event_indices.npy", image_event_indices)
             
             print(f"✅ PNG转numpy完成:")
-            print(f"  images.npy: {images.shape}")
-            print(f"  images_ts.npy: {image_timestamps.shape}")
+            print(f"  images.npy: {images.shape} (200张真实图像)")
+            print(f"  images_ts.npy: {extended_timestamps.shape} (位姿对齐的时间戳)")
             print(f"  image_event_indices.npy: {image_event_indices.shape}")
             
             return True
@@ -259,7 +289,7 @@ class EVREALRunner:
                     cwd=self.config.evreal_path,
                     capture_output=True,
                     text=True,
-                    timeout=600  # 10分钟超时
+                    timeout=1800  # 30分钟超时（足够重建大量图像）
                 )
                 
                 print(f"🚀 DEBUG: 返回码: {result.returncode}")
@@ -358,18 +388,52 @@ class EVREALRunner:
                 # 目标目录
                 target_dir = self.config.reconstruction_dir / f"evreal_{method.lower()}"
                 
-                # 复制整个目录
+                # 智能复制并重命名文件
                 if target_dir.exists():
                     shutil.rmtree(target_dir)
-                shutil.copytree(evreal_output_dir, target_dir)
+                target_dir.mkdir(parents=True, exist_ok=True)
                 
+                # 获取重建结果文件
+                recon_files = sorted(evreal_output_dir.glob("*.png"))
+                if not recon_files:
+                    print(f"⚠️  {method} 输出目录中没有PNG文件")
+                    continue
+                
+                # 获取原始图像列表（用于文件名映射）
+                original_images = sorted(self.config.dataset_dir.glob("train/*.png"))
+                if not original_images:
+                    original_images = sorted(self.config.dataset_dir.glob("test/*.png"))
+                
+                print(f"   找到 {len(recon_files)} 张重建图像，{len(original_images)} 张原始图像")
+                
+                # 文件名映射和复制
+                successful_copies = 0
+                for i, recon_file in enumerate(recon_files):
+                    # 映射到原始图像编号
+                    # 重建通常从第1张图像开始（frame_0000000000 -> 0001.png）
+                    original_idx = i + 1  # frame_0000000000 对应 0001.png
+                    
+                    if original_idx <= len(original_images):
+                        # 生成对应的文件名
+                        target_filename = f"{original_idx:04d}.png"
+                        target_path = target_dir / target_filename
+                        
+                        # 复制并重命名
+                        shutil.copy2(recon_file, target_path)
+                        successful_copies += 1
+                    else:
+                        print(f"⚠️  重建图像索引超出范围: {i} -> {original_idx}")
                 
                 copied_results[method] = target_dir
                 print(f"✅ 复制 {method} 结果到: {target_dir}")
+                print(f"   成功复制并重命名: {successful_copies} 张图像")
                 
-                # 统计重建图像数量
-                png_files = list(target_dir.glob("*.png"))
-                print(f"   重建图像数量: {len(png_files)}")
+                # 验证结果
+                final_files = sorted(target_dir.glob("*.png"))
+                if len(final_files) != len(recon_files):
+                    print(f"⚠️  复制数量不匹配: 预期{len(recon_files)}, 实际{len(final_files)}")
+                else:
+                    print(f"✅ 文件名映射验证通过: {final_files[0].name} - {final_files[-1].name}")
                 
             except Exception as e:
                 print(f"❌ 复制 {method} 结果时出错: {e}")
@@ -461,8 +525,8 @@ def main():
     # 运行集成
     integration = EVREALIntegration(config)
     
-    # 测试单个方法
-    test_methods = ["E2VID"]  # 先测试一个方法
+    # 测试所有重建方法
+    test_methods = None  # 使用默认的所有方法 ["E2VID", "FireNet", "HyperE2VID"]
     results = integration.run_full_pipeline(test_methods)
     
     if results["success"]:

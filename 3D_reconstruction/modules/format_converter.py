@@ -134,10 +134,19 @@ class DVSToEVREALConverter:
             # 创建输出目录
             self.config.evreal_dir.mkdir(parents=True, exist_ok=True)
             
-            # 保存6个必需的npy文件
+            # 同时在sequence子目录中保存一份（EVREAL标准格式要求）
+            sequence_dir = self.config.evreal_dir / "sequence"
+            sequence_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 保存6个必需的npy文件 - 主目录
             np.save(self.config.evreal_dir / "events_ts.npy", evreal_data.events_ts)
             np.save(self.config.evreal_dir / "events_xy.npy", evreal_data.events_xy)
             np.save(self.config.evreal_dir / "events_p.npy", evreal_data.events_p)
+            
+            # 保存6个必需的npy文件 - sequence子目录（EVREAL工作目录）
+            np.save(sequence_dir / "events_ts.npy", evreal_data.events_ts)
+            np.save(sequence_dir / "events_xy.npy", evreal_data.events_xy)
+            np.save(sequence_dir / "events_p.npy", evreal_data.events_p)
             
             # 如果有目标图像，也保存（可选）
             if evreal_data.images is not None:
@@ -147,19 +156,26 @@ class DVSToEVREALConverter:
             if evreal_data.image_event_indices is not None:
                 np.save(self.config.evreal_dir / "image_event_indices.npy", evreal_data.image_event_indices)
             
-            # 保存元数据
+            # 保存元数据 - 主目录和sequence子目录
             metadata_file = self.config.evreal_dir / "metadata.json"
+            sequence_metadata_file = sequence_dir / "metadata.json"
+            
+            # 处理numpy类型以便JSON序列化
+            metadata_serializable = {}
+            for key, value in evreal_data.metadata.items():
+                if isinstance(value, (np.integer, np.floating)):
+                    metadata_serializable[key] = float(value)
+                elif isinstance(value, np.ndarray):
+                    metadata_serializable[key] = value.tolist()
+                else:
+                    metadata_serializable[key] = value
+            
+            # 保存主目录元数据
             with open(metadata_file, 'w') as f:
-                # 处理numpy类型以便JSON序列化
-                metadata_serializable = {}
-                for key, value in evreal_data.metadata.items():
-                    if isinstance(value, (np.integer, np.floating)):
-                        metadata_serializable[key] = float(value)
-                    elif isinstance(value, np.ndarray):
-                        metadata_serializable[key] = value.tolist()
-                    else:
-                        metadata_serializable[key] = value
-                        
+                json.dump(metadata_serializable, f, indent=2)
+            
+            # 保存sequence目录元数据
+            with open(sequence_metadata_file, 'w') as f:
                 json.dump(metadata_serializable, f, indent=2)
             
             print("EVREAL格式文件保存成功:")

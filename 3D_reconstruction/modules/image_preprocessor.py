@@ -142,13 +142,43 @@ class ImagePreprocessor:
         input_files = self._get_image_files()
         print(f"处理 {len(input_files)} 个图像文件")
         
-        # 生成时间戳
-        timestamps = self.timestamp_manager.generate_image_timestamps(len(input_files))
-        print(f"时间戳范围：{timestamps[0]} - {timestamps[-1]} μs")
+        # 生成时间戳和扩展图像序列（如果启用重建缓冲）
+        original_count = len(input_files)
+        
+        # 为重建缓冲复制最后几张图像
+        if self.config.timestamp_config.enable_reconstruction_buffer:
+            buffer_count = self.config.timestamp_config.reconstruction_buffer_frames
+            print(f"启用重建缓冲：复制最后 {buffer_count} 张图像作为缓冲")
+            
+            # 扩展输入文件列表
+            extended_input_files = input_files.copy()
+            last_image = input_files[-1]
+            for i in range(buffer_count):
+                extended_input_files.append(last_image)
+                
+            # 生成扩展的时间戳序列
+            start_time, end_time = self.timestamp_manager.generate_extended_event_timespan(original_count)
+            extended_timestamps = []
+            for i in range(len(extended_input_files)):
+                timestamp_us = start_time + i * self.config.timestamp_config.dt_us
+                extended_timestamps.append(timestamp_us)
+                
+            print(f"原始图像数量: {original_count}")
+            print(f"扩展图像数量: {len(extended_input_files)} (包含{buffer_count}张缓冲)")
+            print(f"时间戳范围：{extended_timestamps[0]} - {extended_timestamps[-1]} μs")
+            
+            actual_input_files = extended_input_files
+            timestamps = extended_timestamps
+        else:
+            # 不启用缓冲的情况
+            timestamps = self.timestamp_manager.generate_image_timestamps(len(input_files))
+            actual_input_files = input_files
+            print(f"时间戳范围：{timestamps[0]} - {timestamps[-1]} μs")
+            
         print(f"时间间隔：{self.config.timestamp_config.dt_us} μs ({self.config.timestamp_config.dt_us/1000:.1f} ms)")
         
         # 复制和重命名图像文件
-        output_files = self._copy_and_rename_images(input_files)
+        output_files = self._copy_and_rename_images(actual_input_files)
         
         if len(output_files) == 0:
             print("错误：没有成功处理任何图像")
@@ -163,15 +193,32 @@ class ImagePreprocessor:
         height, width = first_image.shape
         print(f"图像分辨率：{width}x{height}")
         
-        result = DataFormat.ImageSequence(
-            image_paths=output_files,
-            timestamps_us=timestamps,
-            info_file=info_file
-        )
-        
-        print("图像序列预处理完成！")
-        print(f"输出目录：{self.config.output_dir}")
-        print(f"处理图像数量：{len(output_files)}")
+        # 返回结果：只包含原始图像的信息，缓冲图像仅用于DVS仿真
+        if self.config.timestamp_config.enable_reconstruction_buffer:
+            # 只返回原始图像的路径和时间戳
+            original_output_files = output_files[:original_count]
+            original_timestamps = timestamps[:original_count]
+            
+            result = DataFormat.ImageSequence(
+                image_paths=original_output_files,
+                timestamps_us=original_timestamps,
+                info_file=info_file  # info文件包含所有图像（包括缓冲）
+            )
+            
+            print("图像序列预处理完成！")
+            print(f"输出目录：{self.config.output_dir}")
+            print(f"原始图像数量：{len(original_output_files)}")
+            print(f"总处理图像数量（含缓冲）：{len(output_files)}")
+        else:
+            result = DataFormat.ImageSequence(
+                image_paths=output_files,
+                timestamps_us=timestamps,
+                info_file=info_file
+            )
+            
+            print("图像序列预处理完成！")
+            print(f"输出目录：{self.config.output_dir}")
+            print(f"处理图像数量：{len(output_files)}")
         
         return result
         

@@ -35,6 +35,10 @@ class TimeStampConfig:
     start_time_us: int = 0  # 起始时间（微秒）
     dt_us: int = 1000      # 时间间隔（微秒，默认1ms）
     frame_rate: float = 1000.0  # 有效帧率（Hz）
+    
+    # 事件重建缓冲配置（已废弃 - 错误的解决思路）
+    reconstruction_buffer_frames: int = 0  # 禁用图像缓冲
+    enable_reconstruction_buffer: bool = False  # 禁用重建缓冲
 
 @dataclass
 class DVSConfig:
@@ -217,12 +221,41 @@ class TimestampManager:
         self.config = config
         
     def generate_image_timestamps(self, num_images: int) -> List[int]:
-        """为图像序列生成时间戳"""
+        """为图像序列生成时间戳
+        
+        如果启用重建缓冲，会为最后几张图像预留足够的事件时间，
+        确保事件重建算法有足够的"未来"事件进行重建。
+        """
         timestamps = []
         for i in range(num_images):
             timestamp_us = self.config.start_time_us + i * self.config.dt_us
             timestamps.append(timestamp_us)
         return timestamps
+    
+    def generate_extended_event_timespan(self, num_images: int) -> Tuple[int, int]:
+        """生成扩展的事件时间范围
+        
+        返回: (start_time_us, end_time_us)
+        end_time_us 包含了重建缓冲时间
+        """
+        start_time = self.config.start_time_us
+        
+        # 基础的图像序列结束时间
+        base_end_time = start_time + (num_images - 1) * self.config.dt_us
+        
+        # 如果启用重建缓冲，扩展事件时间范围
+        if self.config.enable_reconstruction_buffer:
+            buffer_time = self.config.reconstruction_buffer_frames * self.config.dt_us
+            extended_end_time = base_end_time + buffer_time
+            
+            print(f"时间戳缓冲配置:")
+            print(f"  图像时间范围: [{start_time}, {base_end_time}] μs")
+            print(f"  扩展事件范围: [{start_time}, {extended_end_time}] μs")
+            print(f"  重建缓冲: {buffer_time} μs ({buffer_time/1000:.1f} ms)")
+            
+            return start_time, extended_end_time
+        else:
+            return start_time, base_end_time
     
     def align_reconstruction_timestamps(self, 
                                      original_timestamps: List[int],
