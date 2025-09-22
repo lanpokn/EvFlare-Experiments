@@ -32,7 +32,8 @@
       "Bash(if [ -f \"/mnt/e/2025/event_flick_flare/EVREAL-main/EVREAL-main/outputs/std/lego/sequence/E2VID/timestamps.txt\" ])",
       "Bash(then)",
       "Bash(else)",
-      "Bash(fi)"
+      "Bash(fi)",
+      "Bash(conda run:*)"
     ],
     "deny": []
   }

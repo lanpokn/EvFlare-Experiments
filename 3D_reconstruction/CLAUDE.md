@@ -117,10 +117,20 @@
 **⚠️ 重要提醒**: 新的时间戳缓冲逻辑已实现但仍需要充分的debug和测试验证，可能存在未发现的bug或边界情况问题。需要完整运行pipeline并验证实际效果。
 ### ✅ 新增完成模块（2025-09-21）
 7. **位姿完美对齐系统** ✅
-   - **时间戳精确对齐**: 重建图像1-199与原始图像1-199时间戳完全一致（误差0.000ms）
+   - **时间戳精确对齐**: 重建图像1-200与原始图像1-200时间戳完全一致（误差0.000ms）
    - **位姿一致性保证**: 重建的第i张图像与原始第i张图像具有完全相同的相机位姿
-   - **文件名映射**: 重建的0001.png-0199.png ↔ 原始的0001.png-0199.png，位姿完全对齐
-   - **199:199完美对应**: 每张重建图像都有精确的位姿对应关系
+   - **文件名映射**: 重建的0001.png-0200.png ↔ 原始的0001.png-0200.png，位姿完全对齐
+   - **200:200完美对应**: 每张重建图像都有精确的位姿对应关系
+
+8. **多方法重建实验结果** ✅ (**2025-09-21完成**)
+   - **成功方法 (4/8)**: E2VID, FireNet, SPADE-E2VID, SSL-E2VID
+   - **失败方法 (4/8)**: E2VID+, FireNet+, ET-Net, HyperE2VID (Windows路径兼容性问题)
+   - **性能排名**:
+     * **最佳质量**: SSL-E2VID (MSE=0.046, SSIM=0.698, LPIPS=0.327)
+     * **次优质量**: SPADE-E2VID (MSE=0.099, SSIM=0.560, LPIPS=0.339)
+     * **最快速度**: FireNet (21.13ms, MSE=0.170)
+     * **经典方法**: E2VID (43.27ms, MSE=0.189)
+   - **数据产出**: 800张重建图像 (4方法×200张)，完美200:200对应
 
 ### 📋 待实施模块（优先级进一步降低）
 8. **结果验证模块**
@@ -182,6 +192,9 @@ python run_full_pipeline.py
 datasets/lego/
 ├── train/                  # 原始训练图像 (200张flare版本)
 ├── test/                   # 原始测试图像 (200张normal版本) 
+├── points3d.ply           # 3D点云文件 (1,518,714点，已修复格式兼容性)
+├── transforms_train.json  # 训练集位姿文件
+├── transforms_test.json   # 测试集位姿文件
 ├── events_dvs/            # DVS原始事件数据
 │   └── lego_train_events.txt  # 4,771,501个事件，格式[t,x,y,p]
 ├── events_evreal/         # EVREAL标准格式
@@ -197,10 +210,10 @@ datasets/lego/
 ├── events_h5/             # H5格式
 │   └── lego_sequence.h5
 └── reconstruction/        # 重建结果目录
-    └── evreal_e2vid/      # E2VID重建结果 (199张480x640图像)
-        ├── frame_0000000000.png
-        ├── frame_0000000001.png
-        └── ...
+    ├── evreal_e2vid/      # E2VID重建结果 (200张480x640图像，完美对应)
+    ├── evreal_firenet/    # FireNet重建结果 (200张)
+    ├── evreal_spade-e2vid/ # SPADE-E2VID重建结果 (200张)
+    └── evreal_ssl-e2vid/  # SSL-E2VID重建结果 (200张)
 ```
 
 ## 🎉 项目成功状态总结（2025-09-21最终更新）
@@ -209,11 +222,11 @@ datasets/lego/
 - **完整Pipeline**: 从lego炫光数据集到事件相机重建的端到端流程
 - **坐标系统统一**: X,Y坐标变换完全正确，无需手动调整
 - **🎯 完美200:200对应**: 通过智能补全第200张图像，实现原始图像与重建图像的完美对应
-- **全方法支持**: 支持EVREAL全部8种重建方法 (E2VID, E2VID+, FireNet, FireNet+, SPADE-E2VID, SSL-E2VID, ET-Net, HyperE2VID)
+- **多方法重建成功**: 4种方法成功重建 (E2VID, FireNet, SPADE-E2VID, SSL-E2VID)，4种方法失败 (路径兼容性问题)
 - **Between-frames机制深度解析**: 通过源代码分析完全理解EVREAL的时间窗口重建逻辑
 - **数学极限突破**: 在between_frames的N-1限制基础上，通过智能补全实现200:200对应
-- **重建质量良好**: MSE=0.189, SSIM=0.513, LPIPS=0.422 (E2VID), MSE=0.170 (FireNet更优)
-- **数据一致性**: 200张重建图像，统一的480x640尺寸，完美的文件名对应
+- **重建质量排名**: SSL-E2VID最佳 (MSE=0.046), SPADE-E2VID次之 (MSE=0.099), FireNet快速 (21ms)
+- **数据一致性**: 800张重建图像 (4方法×200张)，统一的480x640尺寸，完美的文件名对应
 - **文件名映射**: 重建的0001.png-0200.png ↔ 原始的0001.png-0200.png，完美200:200对应
 
 ### 🛠️ 技术规范确认
@@ -234,12 +247,46 @@ datasets/lego/
 - **📊 最终结论**: 200张原始图像 → 199张重建图像 (between_frames数学极限)
 - **✅ 位姿对齐**: 199张重建图像与原始图像1-199完美对齐（0.000ms误差）
 
+## 🎯 3DGS集成状态 (2025-09-22更新)
+
+### ✅ **3D Gaussian Splatting训练就绪**
+- **点云加载问题**: ✅ **已完全解决** - 修复PLY格式兼容性和垃圾异常处理
+- **公平初始化策略**: ✅ **已实现** - 随机灰色点云初始化，避免预制bias
+- **灰度图训练**: ✅ **完全支持** - 端到端灰度图训练pipeline
+- **Windows兼容性**: ✅ **已验证** - 在Windows环境下正常运行
+
+### 🚀 **训练命令**
+```bash
+# 进入3DGS目录
+cd gaussian-splatting
+
+# 灰度图训练 (与事件相机重建公平比较)
+python train.py -s ../datasets/lego -m output/lego_grayscale --iterations 7000 --grayscale
+
+# 包含PDTS智能视图选择的训练
+python train.py -s ../datasets/lego -m output/lego_grayscale_pdts --iterations 7000 --grayscale --pdts --num_selected_views 4
+```
+
+### 📊 **预期输出**
+```
+Original point cloud: 1518714 points
+Spatial range: X[-1.23, 1.45], Y[-0.98, 1.67], Z[-0.87, 1.23]  
+Generated random point cloud with 1518714 gray points in same bounds
+```
+
+### 🎯 **实验设计完整性**
+现在可以进行完整的事件相机3D重建vs传统3DGS的公平比较：
+1. **事件相机路径**: lego_flare → DVS仿真 → EVREAL重建 → 200张灰度图
+2. **3DGS路径**: lego_flare → 随机点云初始化 → 3DGS训练 → 灰度图渲染
+3. **比较基准**: 两种方法都使用相同的200张flare图像，输出灰度图结果
+
 ## ⚠️ 重要提醒
 - **🚨 环境保护铁律**: 绝对不可以破坏conda环境中的已有包！只能添加新包，不能升级/降级现有包！
-- **🔥 CRITICAL**: 必须使用conda的Umain2环境！所有pipeline运行都必须在Umain2环境中执行！
+- **🔥 CRITICAL**: 事件相机pipeline使用Umain2环境，3DGS使用3dgs环境
 - **坐标系统**: 已完全修复，确保X,Y坐标正确对应
 - **文件命名**: 严格按照 `lego_train_events.txt` 等规范命名
 - **时间戳格式**: DVS使用微秒，EVREAL使用秒，H5保持微秒
+- **点云初始化**: 3DGS现使用随机灰色点云，确保公平比较
 
 ## 数据集结构
 
