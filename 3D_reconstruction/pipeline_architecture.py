@@ -185,26 +185,32 @@ class FormatConverter:
     
     @staticmethod
     def dvs_to_h5(dvs_events: DataFormat.DVSEvents) -> DataFormat.H5Events:
-        """DVS格式转H5格式"""
+        """DVS格式转H5格式
+        DVS格式: [timestamp_us, x, y, polarity]
+        H5格式: events/{t,x,y,p}
+        """
         events = dvs_events.events
         
         return DataFormat.H5Events(
-            events_t=events[:, 2],  # 保持微秒时间戳
-            events_x=events[:, 0],
-            events_y=events[:, 1], 
-            events_p=events[:, 3],
+            events_t=events[:, 0],  # 修复：时间戳 (第0列)
+            events_x=events[:, 1],  # 修复：x坐标 (第1列)
+            events_y=events[:, 2],  # 修复：y坐标 (第2列)
+            events_p=events[:, 3],  # 极性 (第3列)
             h5_file=dvs_events.output_file.with_suffix('.h5'),
             metadata=dvs_events.metadata
         )
     
     @staticmethod
     def h5_to_dvs(h5_events: DataFormat.H5Events) -> DataFormat.DVSEvents:
-        """H5格式转回DVS格式"""
+        """H5格式转回DVS格式
+        H5格式: events/{t,x,y,p}
+        DVS格式: [timestamp_us, x, y, polarity]
+        """
         events = np.column_stack([
-            h5_events.events_x,
-            h5_events.events_y,
-            h5_events.events_t,
-            h5_events.events_p
+            h5_events.events_t,  # 时间戳 (第0列)
+            h5_events.events_x,  # x坐标 (第1列) 
+            h5_events.events_y,  # y坐标 (第2列)
+            h5_events.events_p   # 极性 (第3列)
         ])
         
         return DataFormat.DVSEvents(

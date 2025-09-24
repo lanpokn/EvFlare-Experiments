@@ -10,7 +10,7 @@
 6. **坐标系统修复**: X,Y坐标变换bug修复 ✅已完成
 7. **端到端验证**: 完整pipeline测试 ✅已完成
 
-## 🎯 实验核心目标与当前状态（2025-09-21更新）
+## 🎯 实验核心目标与当前状态（2025-09-24更新）
 
 ### 🎯 **核心目标：完美的时间-位姿对齐**
 **关键要求**：重建的第i张图像必须与原始第i张图像在**完全相同的时间点和位姿**生成
@@ -216,7 +216,82 @@ datasets/lego/
     └── evreal_ssl-e2vid/  # SSL-E2VID重建结果 (200张)
 ```
 
-## 🎉 项目成功状态总结（2025-09-21最终更新）
+## 🎉 项目成功状态总结（2025-09-24最新更新）
+
+### ✅ 已完成的重要工作（2025-09-24）
+
+#### **H5数据格式错位修复** ✅ **完全修复**
+- **问题发现**: H5文件中t/x/y/p字段错位，DVS格式`[timestamp_us, x, y, polarity]`被错误保存为`[y, timestamp_us, x, polarity]`
+- **修复范围**: 
+  * `pipeline_architecture.py`: `dvs_to_h5`和`h5_to_dvs`函数列索引修正
+  * `modules/format_converter.py`: `convert_dvs_to_h5`和`h5_to_dvs_txt`函数列索引修正
+- **验证结果**: 
+  * 修复前H5: t[0,479], x[225,199000], y[20,639] ❌ (字段错位)
+  * 修复后H5: t[225,199000], x[20,639], y[0,479] ✅ (完全正确)
+- **数据保护**: 错误版本备份为`lego_sequence_backup_wrong.h5`
+
+#### **H5批量重建脚本开发** ⚠️ **进行中**
+- **脚本文件**: `batch_h5_reconstruction.py` ✅ 已创建
+- **功能设计**: 
+  * 扫描`events_h5/`目录中所有H5文件（跳过backup）
+  * 对每个H5文件: H5→EVREAL格式转换 → EVREAL重建 → 结果复制
+  * 输出目录按H5文件名命名: `reconstruction_lego_sequence`, `reconstruction_lego_sequence_Unet`等
+- **架构设计**: 完全复用一键式pipeline的成功配置，只替换事件数据
+  * 📁 复用`datasets/lego/events_evreal/sequence/`中的images/、metadata.json、image_event_indices.npy等
+  * 🔄 只替换events_ts.npy、events_xy.npy、events_p.npy三个事件文件
+  * ⚙️ 复用一键式的EVREAL数据集配置和调用方式
+
+#### **当前发现的H5文件** ✅ **已确认**
+```
+datasets/lego/events_h5/
+├── lego_sequence.h5                    # 4,771,501个事件 (原始DVS数据)
+├── lego_sequence_Unet.h5              # 1,625,389个事件 (UNet处理后)  
+├── lego_sequence_Unetsimple.h5        # 2,024,551个事件 (UNet Simple处理后)
+└── lego_sequence_backup_wrong.h5      # 备份的错误版本 (跳过)
+```
+
+### ⚠️ 当前待解决的关键问题（2025-09-24）
+
+#### **问题1: EVREAL配置路径错误** 🔍 **需要Debug**
+- **错误现象**: `FileNotFoundError: 'config/dataset/batch_lego_sequence.json'`
+- **已修正**: EVREAL实际配置路径为`config/dataset/`不是`configs/datasets/`
+- **状态**: 路径已修正但仍需验证是否完全解决
+
+#### **问题2: 批量重建耗时过长且输出目录为空** 🔍 **需要Debug**  
+- **现象描述**: 
+  * 运行时间过长，可能卡在EVREAL重建阶段
+  * `reconstruction_lego_sequence`等输出目录创建但为空
+  * 没有看到成功的重建图像输出
+- **可能原因**: 
+  * EVREAL重建过程中断或失败
+  * 结果复制逻辑有误，没有正确复制到目标目录
+  * 重建方法之间可能存在覆盖问题
+
+#### **问题3: 结果复制和目录管理** 🔍 **需要验证**
+- **关键风险**: 多个H5文件处理时，重建结果可能相互覆盖
+- **需要确认**: 
+  * 每个H5文件是否生成独立的输出目录
+  * EVREAL的outputs目录是否会被后续处理覆盖
+  * 复制逻辑是否正确匹配文件名模式
+
+### 🎯 下次Debug重点任务
+
+1. **验证EVREAL调用**:
+   - 手动测试单个数据集的EVREAL重建是否成功
+   - 检查EVREAL输出目录`/mnt/e/2025/event_flick_flare/EVREAL-main/EVREAL-main/outputs`
+   - 确认重建方法命名和文件匹配逻辑
+
+2. **优化批量处理流程**:
+   - 添加详细的进度输出和超时处理
+   - 实现"完成一个序列立即复制"的策略避免覆盖
+   - 添加重建结果验证逻辑
+
+3. **测试策略**:
+   - 先测试单个H5文件的完整流程
+   - 验证时间戳对齐和200:200图像对应
+   - 确认多个H5文件不会相互干扰
+
+## 🎉 历史项目成功状态总结（2025-09-21完成版本）
 
 ### ✅ 核心技术成就 (最终版本)
 - **完整Pipeline**: 从lego炫光数据集到事件相机重建的端到端流程
@@ -283,10 +358,42 @@ Generated random point cloud with 1518714 gray points in same bounds
 ## ⚠️ 重要提醒
 - **🚨 环境保护铁律**: 绝对不可以破坏conda环境中的已有包！只能添加新包，不能升级/降级现有包！
 - **🔥 CRITICAL**: 事件相机pipeline使用Umain2环境，3DGS使用3dgs环境
+- **🔥 CRITICAL**: H5批量重建脚本必须在Umain2环境中运行: `source ~/miniconda3/etc/profile.d/conda.sh && conda activate Umain2`
 - **坐标系统**: 已完全修复，确保X,Y坐标正确对应
 - **文件命名**: 严格按照 `lego_train_events.txt` 等规范命名
 - **时间戳格式**: DVS使用微秒，EVREAL使用秒，H5保持微秒
 - **点云初始化**: 3DGS现使用随机灰色点云，确保公平比较
+
+## 🛠️ 批量重建脚本使用方法
+
+### 快速启动命令
+```bash
+# 激活Umain2环境并运行批量重建
+source ~/miniconda3/etc/profile.d/conda.sh && conda activate Umain2 && python batch_h5_reconstruction.py
+```
+
+### 脚本功能概述
+- **输入**: `datasets/lego/events_h5/`中的所有H5文件（除backup）
+- **处理**: 每个H5文件 → H5→EVREAL转换 → EVREAL重建 → 结果复制
+- **输出**: `datasets/lego/reconstruction_*`目录，按H5文件名命名
+- **方法**: E2VID, FireNet, SPADE-E2VID, SSL-E2VID (4种成功方法)
+
+### 当前脚本执行状态（2025-09-24 15:30）
+```
+✅ 脚本创建: batch_h5_reconstruction.py (17KB)
+✅ 目录创建: reconstruction_lego_sequence, reconstruction_lego_sequence_Unet, reconstruction_lego_sequence_Unetsimple (均为空)
+✅ H5数据: 3个有效H5文件 + 1个backup (总计309MB)
+⚠️  重建结果: 所有输出目录为空，表明EVREAL重建或结果复制失败
+```
+
+### 当前已知问题
+1. **EVREAL配置路径问题**（已修正路径但需验证）
+   - 错误：`FileNotFoundError: 'config/dataset/batch_lego_sequence.json'`
+   - 修正：路径从`configs/datasets/`改为`config/dataset/`
+2. **重建耗时长且输出目录空**（关键问题）
+   - 现象：3个reconstruction_*目录已创建但完全为空
+   - 可能原因：EVREAL重建失败、结果复制逻辑错误、或者重建过程被中断
+3. **多文件处理可能存在覆盖风险**（需要优化流程）
 
 ## 数据集结构
 

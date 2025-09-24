@@ -214,11 +214,11 @@ class EVREALToH5Converter:
                 # 创建events组
                 events_group = f.create_group('events')
                 
-                # 按照用户要求的格式保存
-                events_group.create_dataset('t', data=events[:, 2])  # 时间戳(微秒)
-                events_group.create_dataset('x', data=events[:, 0])  # x坐标
-                events_group.create_dataset('y', data=events[:, 1])  # y坐标
-                events_group.create_dataset('p', data=events[:, 3])  # 极性
+                # 修复：按照DVS正确格式 [timestamp_us, x, y, polarity] 保存
+                events_group.create_dataset('t', data=events[:, 0])  # 修复：时间戳(第0列)
+                events_group.create_dataset('x', data=events[:, 1])  # 修复：x坐标(第1列)
+                events_group.create_dataset('y', data=events[:, 2])  # 修复：y坐标(第2列)
+                events_group.create_dataset('p', data=events[:, 3])  # 极性(第3列)
                 
                 # 保存元数据作为属性
                 events_group.attrs['num_events'] = events.shape[0]
@@ -273,12 +273,12 @@ class EVREALToH5Converter:
     def h5_to_dvs_txt(self, h5_events: DataFormat.H5Events, output_file: Path) -> bool:
         """H5格式转回DVS txt格式"""
         try:
-            # 重组事件数据
+            # 修复：重组事件数据为DVS格式 [timestamp_us, x, y, polarity]
             events = np.column_stack([
-                h5_events.events_x,
-                h5_events.events_y, 
-                h5_events.events_t,
-                h5_events.events_p
+                h5_events.events_t,  # 时间戳 (第0列)
+                h5_events.events_x,  # x坐标 (第1列)
+                h5_events.events_y,  # y坐标 (第2列) 
+                h5_events.events_p   # 极性 (第3列)
             ])
             
             # 保存为txt格式
