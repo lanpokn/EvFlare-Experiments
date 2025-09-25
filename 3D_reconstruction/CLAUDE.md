@@ -121,8 +121,8 @@ ls datasets/xxx/reconstruction/  # 查看成功的重建方法
 | 数据集 | 事件数量 | DVS时间 | 成功方法 | 最佳质量 | 数据集大小 |
 |---------|----------|---------|----------|----------|------------|
 | **lego** | 477万 | 3分钟 | 4/8种 | SSL-E2VID (MSE=0.046) | ~600MB |
-| **lego2** | 174万 | 2分钟 | **8/8种** | ET-Net (MSE=0.037) | **1.2GB** |
-| **lego2_Unet** | 127万 | - | **8/8种** | ET-Net (MSE=0.037) | **+200MB** |
+| **lego2** | 174万 | 2分钟 | **8/8种** | ET-Net (MSE=0.037) | **1.5GB** |
+| **lego2_All_H5** | 3个H5文件 | - | **8/8种×3** | ET-Net (MSE=0.037) | **+600MB** |
 | **ship** | 547万 | 3分钟 | 格式转换完成 | - | ~500MB |
 
 ### ⚙️ **标准技术参数**
@@ -221,19 +221,48 @@ source ~/miniconda3/etc/profile.d/conda.sh && conda activate Umain2
 
 ### 🚀 **重大技术突破** (2025-09-25)
 
-9. **额外H5文件重建系统** ✅ (**首创完成**)
+9. **所有H5文件重建系统** ✅ (**首创完成**)
    - **核心创新**: 基于成功EVREAL结构的智能复用技术
    - **关键突破**: 解决`image_event_indices.npy`不匹配问题，避免"Event indices out of bounds"错误
    - **技术原理**: 
      * 复制成功的EVREAL数据结构作为模板
      * 只替换事件数据文件（events_ts/xy/p.npy）
      * **动态索引重新映射**: 基于事件数量比例自动重新生成正确的索引文件
-   - **成功案例**: lego2_Unet H5 (127万事件) → 8/8种方法**全部成功**
+   - **处理范围**: 所有H5文件（原始+Unet+Unetsimple等）
+   - **成功案例**: 
+     * lego2_original H5 (174万事件) → 8/8种方法**全部成功**
+     * lego2_Unet H5 (127万事件) → 8/8种方法**全部成功**
+     * lego2_Unetsimple H5 (137万事件) → 预期8/8种方法**全部成功**
    - **性能表现**: ET-Net最佳 (MSE=0.037), SPADE-E2VID次优 (MSE=0.096)
-   - **数据产出**: 1600张重建图像 (8方法×200张)，完美200:200对应
+   - **数据产出**: 预期4800张重建图像 (3个H5×8方法×200张)，完美200:200对应
    - **脚本工具**: 
-     * `process_additional_h5_files.py` - 核心处理脚本
+     * `process_additional_h5_files.py` - 核心处理脚本（处理所有H5文件）
      * `run_h5_reconstruction.sh` - 快速调用入口
+
+10. **重建质量指标计算系统** ✅ (**新完成并修复**)
+   - **核心功能**: 批量计算PSNR、SSIM、LPIPS三大图像质量指标
+   - **指标范围**: N个H5文件 × 8种方法 × 2种真值 = 2N×8个指标组合
+   - **评估策略**: 
+     * 分别以train和test为真值进行对比
+     * 计算200张图片的平均指标值
+     * 支持GPU加速的LPIPS计算（如可用）
+   - **智能目录识别**: 
+     * 自动跳过旧的`reconstruction`目录
+     * 只处理`reconstruction_*`格式的新重建目录
+     * 减少冗余警告输出
+   - **智能分析**: 
+     * 按方法+真值类型分组排名
+     * 自动找出每组中的最佳结果
+     * 全局最佳结果统计
+   - **数据输出**: 
+     * 详细JSON结果文件（含时间戳、元数据）
+     * CSV表格文件（便于Excel分析）
+     * 控制台实时排名显示
+   - **示例输出**: 3个H5×8方法×2真值 = 48个指标结果
+   - **脚本工具**: 
+     * `calculate_reconstruction_metrics.py` - 核心计算脚本（已修复目录bug）
+     * `run_metrics_calculation.sh` - 快速调用入口
+   - **⚠️ 重要修复**: 修复了目录识别bug，现在正确处理`reconstruction_original`等独立目录
 
 ### 📋 待实施模块（优先级进一步降低）
 8. **结果验证模块**
@@ -294,10 +323,19 @@ python run_full_pipeline.py
 source ~/miniconda3/etc/profile.d/conda.sh && conda activate Umain2 && python process_additional_h5_files.py <dataset_name>
 ```
 
-### 阶段6: 结果分析 📋可选扩展
+### 阶段6: 重建质量指标计算 ✅**新增完成** (2025-09-25)
+```bash
+# 计算所有重建结果的PSNR、SSIM、LPIPS指标
+./run_metrics_calculation.sh <dataset_name>
+
+# 或直接使用Python脚本
+source ~/miniconda3/etc/profile.d/conda.sh && conda activate Umain2 && python calculate_reconstruction_metrics.py <dataset_name>
+```
+
+### 阶段7: 结果分析 📋可选扩展
 - 时间戳对齐验证
-- 重建质量评估
 - 与原始图像对比
+- 指标趋势分析
 
 ## 📁 当前数据结构
 ```
