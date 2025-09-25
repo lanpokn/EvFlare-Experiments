@@ -33,7 +33,8 @@
       "Bash(then)",
       "Bash(else)",
       "Bash(fi)",
-      "Bash(conda run:*)"
+      "Bash(conda run:*)",
+      "Bash(chmod:*)"
     ],
     "deny": []
   }

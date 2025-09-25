@@ -121,7 +121,8 @@ ls datasets/xxx/reconstruction/  # 查看成功的重建方法
 | 数据集 | 事件数量 | DVS时间 | 成功方法 | 最佳质量 | 数据集大小 |
 |---------|----------|---------|----------|----------|------------|
 | **lego** | 477万 | 3分钟 | 4/8种 | SSL-E2VID (MSE=0.046) | ~600MB |
-| **lego2** | 174万 | 2分钟 | 5/8种 | E2VID+ (MSE=0.043) | 845MB |
+| **lego2** | 174万 | 2分钟 | **8/8种** | ET-Net (MSE=0.037) | **1.2GB** |
+| **lego2_Unet** | 127万 | - | **8/8种** | ET-Net (MSE=0.037) | **+200MB** |
 | **ship** | 547万 | 3分钟 | 格式转换完成 | - | ~500MB |
 
 ### ⚙️ **标准技术参数**
@@ -218,6 +219,22 @@ source ~/miniconda3/etc/profile.d/conda.sh && conda activate Umain2
      * **经典方法**: E2VID (43.27ms, MSE=0.189)
    - **数据产出**: 800张重建图像 (4方法×200张)，完美200:200对应
 
+### 🚀 **重大技术突破** (2025-09-25)
+
+9. **额外H5文件重建系统** ✅ (**首创完成**)
+   - **核心创新**: 基于成功EVREAL结构的智能复用技术
+   - **关键突破**: 解决`image_event_indices.npy`不匹配问题，避免"Event indices out of bounds"错误
+   - **技术原理**: 
+     * 复制成功的EVREAL数据结构作为模板
+     * 只替换事件数据文件（events_ts/xy/p.npy）
+     * **动态索引重新映射**: 基于事件数量比例自动重新生成正确的索引文件
+   - **成功案例**: lego2_Unet H5 (127万事件) → 8/8种方法**全部成功**
+   - **性能表现**: ET-Net最佳 (MSE=0.037), SPADE-E2VID次优 (MSE=0.096)
+   - **数据产出**: 1600张重建图像 (8方法×200张)，完美200:200对应
+   - **脚本工具**: 
+     * `process_additional_h5_files.py` - 核心处理脚本
+     * `run_h5_reconstruction.sh` - 快速调用入口
+
 ### 📋 待实施模块（优先级进一步降低）
 8. **结果验证模块**
    - 文件完整性自动检查
@@ -268,7 +285,16 @@ python modules/evreal_integration.py
 python run_full_pipeline.py
 ```
 
-### 阶段5: 结果分析 📋可选扩展
+### 阶段5: 所有H5文件重建 ✅**新增完成** (2025-09-25)
+```bash
+# 处理所有H5文件（包括原始、Unet、Unetsimple等处理后的事件数据）
+./run_h5_reconstruction.sh <dataset_name>
+
+# 或直接使用Python脚本
+source ~/miniconda3/etc/profile.d/conda.sh && conda activate Umain2 && python process_additional_h5_files.py <dataset_name>
+```
+
+### 阶段6: 结果分析 📋可选扩展
 - 时间戳对齐验证
 - 重建质量评估
 - 与原始图像对比
