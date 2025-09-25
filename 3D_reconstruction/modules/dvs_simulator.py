@@ -121,7 +121,7 @@ class DVSSimulatorWrapper:
     def _prepare_input_structure(self, image_sequence: DataFormat.ImageSequence) -> Path:
         """准备DVS-Voltmeter所需的输入目录结构"""
         # 创建子目录结构：input_dir/sequence_name/
-        sequence_name = "lego_sequence"
+        sequence_name = "lego_sequence_new"
         sequence_dir = self.config.input_dir / sequence_name
         sequence_dir.mkdir(parents=True, exist_ok=True)
         
@@ -136,7 +136,7 @@ class DVSSimulatorWrapper:
         with open(info_file, 'w') as f:
             for i, timestamp in enumerate(image_sequence.timestamps_us):
                 # 相对于DVS-Voltmeter工作目录的路径
-                relative_path = f"../temp/dvs_input/lego_sequence/{i:03d}.png"
+                relative_path = f"../temp/dvs_input/lego_sequence_new/{i:03d}.png"
                 f.write(f"{relative_path} {timestamp}\n")
                 
         return sequence_dir
@@ -285,7 +285,7 @@ class DVSSimulatorWrapper:
         
         if result:
             # 将事件文件复制到数据集目录并重命名
-            dataset_events_file = self.config.output_dir / "lego_train_events.txt"
+            dataset_events_file = self.config.output_dir / "lego_train_events_new.txt"
             self.config.output_dir.mkdir(parents=True, exist_ok=True)
             
             # 复制文件

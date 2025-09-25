@@ -126,7 +126,7 @@ class DVSToEVREALConverter:
             print(f"转换为EVREAL格式时出错: {e}")
             return None
     
-    def save_evreal_format(self, evreal_data: DataFormat.EVREALFormat, sequence_name: str = "lego_sequence") -> bool:
+    def save_evreal_format(self, evreal_data: DataFormat.EVREALFormat, sequence_name: str = "lego_sequence_new") -> bool:
         """保存EVREAL格式文件"""
         print(f"保存EVREAL格式到: {self.config.evreal_dir}")
         
@@ -320,7 +320,7 @@ class FormatConverterPipeline:
         self.dvs_to_evreal = DVSToEVREALConverter(config)
         self.evreal_to_h5 = EVREALToH5Converter(config)
         
-    def convert_dvs_events(self, dvs_file: Path, sequence_name: str = "lego_sequence") -> Dict[str, bool]:
+    def convert_dvs_events(self, dvs_file: Path, sequence_name: str = "lego_sequence_new") -> Dict[str, bool]:
         """完整的DVS事件转换流程"""
         print("=" * 60)
         print("开始DVS事件格式转换")
@@ -356,7 +356,7 @@ def main():
     config = ConversionConfig()
     
     # 查找DVS输出文件
-    dvs_file = Path("datasets/lego/events_dvs/lego_train_events.txt")
+    dvs_file = Path("datasets/lego/events_dvs/lego_train_events_new.txt")
     
     if not dvs_file.exists():
         print(f"DVS事件文件不存在: {dvs_file}")

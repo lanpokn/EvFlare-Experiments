@@ -82,7 +82,7 @@ def main():
     success = run_step(
         "DVS事件仿真",
         "python modules/dvs_simulator.py",
-        lambda: Path("datasets/lego/events_dvs/lego_train_events.txt").exists()
+        lambda: Path("datasets/lego/events_dvs/lego_train_events_new.txt").exists()
     )
     if not success:
         return False
@@ -113,7 +113,7 @@ def main():
     # 统计结果
     train_images = len(list(Path("datasets/lego/train").glob("*.png")))
     test_images = len(list(Path("datasets/lego/test").glob("*.png"))) 
-    event_file = Path("datasets/lego/events_dvs/lego_train_events.txt")
+    event_file = Path("datasets/lego/events_dvs/lego_train_events_new.txt")
     reconstruction_dir = Path("datasets/lego/reconstruction")
     
     print(f"✅ 训练图像 (flare): {train_images}张")
