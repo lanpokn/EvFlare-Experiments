@@ -50,8 +50,8 @@ class DVSConfig:
     
     def __post_init__(self):
         if self.model_params is None:
-            # DVS346默认参数 - k1参数已修改为12
-            self.model_params = [12, 20, 0.0001, 1e-7, 5e-9, 1e-05]
+            # DVS346默认参数 - k1参数恢复默认值
+            self.model_params = [7, 20, 0.0001, 1e-7, 5e-9, 1e-05]
 
 @dataclass
 class EVREALConfig:

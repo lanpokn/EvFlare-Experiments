@@ -28,7 +28,7 @@ except ImportError:
 class ConversionConfig:
     """格式转换配置"""
     dataset_name: str = "lego"
-    dataset_dir: Path = Path("datasets/lego")
+    dataset_dir: Path = Path("datasets/lego")  # 默认值，应该通过参数覆盖
     
     # EVREAL输出配置
     evreal_dir: Optional[Path] = None
@@ -40,10 +40,9 @@ class ConversionConfig:
     sensor_resolution: Tuple[int, int] = (480, 640)  # (height, width) - EVREAL要求格式
     
     def __post_init__(self):
-        if self.evreal_dir is None:
-            self.evreal_dir = self.dataset_dir / "events_evreal"
-        if self.h5_dir is None:
-            self.h5_dir = self.dataset_dir / "events_h5"
+        # 强制根据dataset_dir重新设置路径，确保动态数据集支持
+        self.evreal_dir = self.dataset_dir / "events_evreal"
+        self.h5_dir = self.dataset_dir / "events_h5"
 
 class DVSToEVREALConverter:
     """DVS格式转EVREAL格式转换器"""

@@ -120,8 +120,10 @@ class DVSSimulatorWrapper:
         
     def _prepare_input_structure(self, image_sequence: DataFormat.ImageSequence) -> Path:
         """准备DVS-Voltmeter所需的输入目录结构"""
-        # 创建子目录结构：input_dir/sequence_name/
-        sequence_name = "lego_sequence_new"
+        # 创建子目录结构：input_dir/sequence_name/ - 使用动态数据集名称
+        # 从输出目录路径推断数据集名称
+        dataset_name = self.config.output_dir.parent.name  # 从 datasets/xxx/events_dvs 中获取 xxx
+        sequence_name = f"{dataset_name}_sequence_new"
         sequence_dir = self.config.input_dir / sequence_name
         sequence_dir.mkdir(parents=True, exist_ok=True)
         
@@ -136,7 +138,7 @@ class DVSSimulatorWrapper:
         with open(info_file, 'w') as f:
             for i, timestamp in enumerate(image_sequence.timestamps_us):
                 # 相对于DVS-Voltmeter工作目录的路径
-                relative_path = f"../temp/dvs_input/lego_sequence_new/{i:03d}.png"
+                relative_path = f"../temp/dvs_input/{sequence_name}/{i:03d}.png"
                 f.write(f"{relative_path} {timestamp}\n")
                 
         return sequence_dir
@@ -164,16 +166,21 @@ class DVSSimulatorWrapper:
             # 使用临时配置
             shutil.copy(temp_config, original_config)
             
-            # 运行DVS仿真器
+            # 运行DVS仿真器 - 使用绝对路径解决工作目录问题
+            input_dir_abs = str(self.config.input_dir.resolve())
+            output_dir_abs = str(self.config.output_dir.resolve())
+            
             cmd = [
                 "python", str(self.main_script),
                 "--camera_type", self.config.dvs_config.camera_type,
                 "--model_para"] + [str(p) for p in self.config.dvs_config.model_params] + [
-                "--input_dir", str(self.config.input_dir),
-                "--output_dir", str(self.config.output_dir)
+                "--input_dir", input_dir_abs,
+                "--output_dir", output_dir_abs
             ]
             
             print(f"执行命令: {' '.join(cmd)}")
+            print(f"输入目录: {input_dir_abs}")
+            print(f"输出目录: {output_dir_abs}")
             
             # 切换到DVS-Voltmeter目录执行
             result = subprocess.run(
@@ -284,8 +291,9 @@ class DVSSimulatorWrapper:
         result = self._load_simulation_results()
         
         if result:
-            # 将事件文件复制到数据集目录并重命名
-            dataset_events_file = self.config.output_dir / "lego_train_events_new.txt"
+            # 将事件文件复制到数据集目录并重命名 - 使用动态数据集名称
+            dataset_name = self.config.output_dir.parent.name
+            dataset_events_file = self.config.output_dir / f"{dataset_name}_train_events_new.txt"
             self.config.output_dir.mkdir(parents=True, exist_ok=True)
             
             # 复制文件
