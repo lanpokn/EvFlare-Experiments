@@ -41,12 +41,22 @@ def fix_json_file(json_path):
 
 def main():
     """修复所有transforms JSON文件"""
-    lego_dir = Path("datasets/lego")
+    import sys
+    
+    # 支持命令行参数指定数据集
+    if len(sys.argv) > 1:
+        dataset_name = sys.argv[1]
+    else:
+        dataset_name = "lego"
+        
+    dataset_dir = Path(f"datasets/{dataset_name}")
     
     json_files = [
-        lego_dir / "transforms_train.json",
-        lego_dir / "transforms_test.json"
+        dataset_dir / "transforms_train.json",
+        dataset_dir / "transforms_test.json"
     ]
+    
+    print(f"修复数据集: {dataset_name}")
     
     for json_file in json_files:
         if json_file.exists():
@@ -54,7 +64,7 @@ def main():
         else:
             print(f"⚠️  文件不存在: {json_file}")
     
-    print("\n🎉 所有JSON文件修复完成！")
+    print(f"\n🎉 {dataset_name}的所有JSON文件修复完成！")
     print("现在可以正常运行3DGS训练了")
 
 if __name__ == "__main__":
