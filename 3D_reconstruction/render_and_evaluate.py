@@ -1,7 +1,25 @@
 #!/usr/bin/env python3
 """
 3DGS Render and Evaluate Existing Models
-Renders images from trained 3DGS models and calculates evaluation metrics
+========================================
+
+Purpose: 
+- Renders test images from trained 3DGS models
+- Calculates evaluation metrics (PSNR, SSIM, LPIPS)
+- Generates comparison reports
+
+Usage:
+  python render_and_evaluate.py --dataset lego2 --method spade_e2vid --weights-dir "gaussian-splatting/output"
+
+Prerequisites:
+  1. Models must be trained first using train_3dgs_batch.bat
+  2. Dataset directory must exist with test images
+  3. Weights directory must contain trained models with point_cloud checkpoints
+
+Output:
+  - Rendered images: datasets/{dataset}/3dgs_results/final_renders/{model}/
+  - Metrics: datasets/{dataset}/3dgs_results/final_metrics/{model}_metrics.txt
+  - Reports: comparison_report.txt and comparison_report.json
 """
 
 import os
@@ -14,18 +32,32 @@ from datetime import datetime
 import argparse
 
 def find_trained_models(weights_dir):
-    """Find all trained models with iteration_7000"""
+    """Find all trained models with the latest iteration"""
     models = []
     if not os.path.exists(weights_dir):
         return models
     
     for model_dir in os.listdir(weights_dir):
         model_path = os.path.join(weights_dir, model_dir)
-        checkpoint_path = os.path.join(model_path, "point_cloud", "iteration_7000", "point_cloud.ply")
+        point_cloud_dir = os.path.join(model_path, "point_cloud")
         
-        if os.path.exists(checkpoint_path):
-            models.append(model_dir)
-            print(f"Found trained model: {model_dir}")
+        if os.path.exists(point_cloud_dir):
+            # Find all iteration directories
+            iterations = []
+            for item in os.listdir(point_cloud_dir):
+                if item.startswith("iteration_"):
+                    try:
+                        iter_num = int(item.split("_")[1])
+                        checkpoint_path = os.path.join(point_cloud_dir, item, "point_cloud.ply")
+                        if os.path.exists(checkpoint_path):
+                            iterations.append(iter_num)
+                    except:
+                        continue
+            
+            if iterations:
+                latest_iter = max(iterations)
+                models.append((model_dir, latest_iter))
+                print(f"Found trained model: {model_dir} (iteration {latest_iter})")
     
     return models
 
@@ -57,22 +89,23 @@ def copy_model_for_rendering(source_path, temp_path):
         print(f"ERROR: Failed to copy model: {e}")
         return False
 
-def render_model(model_name, temp_output_dir, gaussian_splatting_dir, dataset_dir):
+def render_model(model_name, temp_output_dir, gaussian_splatting_dir, dataset_dir, iteration):
     """Render test set for a specific model"""
     render_cmd = [
         "python", 
         os.path.join(gaussian_splatting_dir, "render.py"),
         "-m", temp_output_dir,
-        "-s", dataset_dir,  # Add source dataset path!
+        "-s", dataset_dir,
+        "--iteration", str(iteration),
         "--skip_train",
         "--grayscale"
     ]
     
-    return run_command(render_cmd, f"Rendering {model_name}")
+    return run_command(render_cmd, f"Rendering {model_name} (iteration {iteration})")
 
-def backup_renders(temp_output_dir, render_dest):
+def backup_renders(temp_output_dir, render_dest, iteration):
     """Backup rendered images to final location"""
-    render_source = os.path.join(temp_output_dir, "test", "ours_7000", "renders")
+    render_source = os.path.join(temp_output_dir, "test", f"ours_{iteration}", "renders")
     
     print(f"DEBUG: Looking for renders at: {render_source}")
     
@@ -269,9 +302,9 @@ def main():
     success_models = []
     failed_models = []
     
-    for model_name in trained_models:
+    for model_name, iteration in trained_models:
         print(f"\n{'='*40}")
-        print(f"Processing Model: {model_name}")
+        print(f"Processing Model: {model_name} (iteration {iteration})")
         print(f"{'='*40}")
         
         # Setup paths
@@ -285,13 +318,13 @@ def main():
                 continue
             
             # Render test set
-            if not render_model(model_name, temp_output_dir, gaussian_splatting_dir, dataset_dir):
+            if not render_model(model_name, temp_output_dir, gaussian_splatting_dir, dataset_dir, iteration):
                 failed_models.append(model_name)
                 continue
             
             # Backup renders
             render_dest = os.path.join(render_output_dir, model_name)
-            if not backup_renders(temp_output_dir, render_dest):
+            if not backup_renders(temp_output_dir, render_dest, iteration):
                 failed_models.append(model_name)
                 continue
             

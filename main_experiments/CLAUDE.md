@@ -138,17 +138,19 @@ deactivate
 - **依赖**: h5py 库
 
 ### 批量H5评估脚本 ✅
-- **文件**: `evaluate_simu_pairs_optimized.py` (单方法版)
-- **文件**: `evaluate_all_methods.py` (多方法版)
+- **文件**: `evaluate_simu_pairs_optimized.py` (单方法版，已过时)
+- **文件**: `evaluate_all_methods.py` (多方法版，推荐使用)
 - **功能**: 批量评估H5文件的去炫光效果
-- **数据结构**: 
-  - **真值**: `background_with_light_events_test/` (包含 `*_bg_light.h5`)
-  - **各种方法**: 其他所有文件夹 (包含 `*_bg_flare.h5` 等各种方法的结果)
+- **数据结构**:
+  - **真值**: `target/` (包含 `*_bg_light.h5`)
+  - **各种方法**: 其他所有文件夹，文件夹名即方法名 (包含 `*_bg_flare.h5`)
+  - **配对逻辑**: 通过文件名前缀匹配，如 `composed_00470_bg_light.h5` 对应 `composed_00470_bg_flare.h5`
   - **评估原则**: 计算各种方法相对于真值的指标，方法间不互相比较
 - **特点**:
-  - 仅计算 chamfer_distance 和 gaussian_distance 
-  - 结果统一保存到 `results/` 目录
-  - 自动生成包含平均数行的CSV文件
+  - 默认计算8个指标：chamfer_distance, gaussian_distance, pger, pmse_2, pmse_4, rf1, tf1, tpf1
+  - 支持通过 `--metrics` 参数自定义指标组合
+  - 结果统一保存到 `results/multi_method_evaluation_results.csv`
+  - 自动生成包含AVERAGE行的CSV文件，适合论文直接使用
   - 支持动态发现新增方法文件夹
 
 ### 测试脚本 ✅
@@ -372,6 +374,7 @@ python evaluate_evk4_methods.py --quiet --output results
 - **EVK4数据**: `results/evk4_evaluation_results.csv`
 - **格式**: sample_id, {method1}_{metric1}, {method1}_{metric2}, {method2}_{metric1}, ...
 - **特点**: 包含所有发现的方法×所选指标，最后一行为AVERAGE，适合论文直接使用
+- **数据清洗**: Simu数据已删除composed_01000-01004无效样本，当前35个有效样本
 
 ### **默认指标详解**
 **EVK4评估默认包含9个指标**：
@@ -413,11 +416,24 @@ python evaluate_all_methods.py --metrics chamfer_distance my_voxel_metric
 ```
 
 ### 完整指标体系 ✅
-**总计10个指标，5个类别**
+**总计14个指标，6个类别**
 
-#### **距离类指标 (Lower is Better)** 
+#### **距离类指标 (Lower is Better)**
 - **`chamfer_distance`**: **单向Chamfer距离**，只计算estimated→ground truth的KDTree最近邻距离，避免惩罚炫光移除
 - **`gaussian_distance`**: **单向高斯加权距离**，sigma=0.4，只计算estimated→ground truth方向，专门优化去炫光任务评估
+
+#### **核方法指标 (Lower is Better)** ✅ 新增
+基于RKHS（再生核希尔伯特空间）的3D高斯核距离，考虑时空极性的综合匹配度：
+- **`kernel_standard`**: 标准配置（32×32×5ms块，σ=5/5/5000），均衡评估时空重建质量
+- **`kernel_fine`**: 细粒度配置（16×16×2ms块，σ=3/3/2000），对局部细节和精确结构敏感
+- **`kernel_spatial`**: 空间主导配置（32×32×10ms块，σ=3/3/10000），强调空间准确性，适合炫光去除空间效果评估
+- **`kernel_temporal`**: 时间主导配置（64×64×2ms块，σ=10/10/1000），强调时间精度，适合运动和同步评估
+
+**核方法优化**：
+- 向量化分块实现，10×加速（避免Python循环）
+- 原理：将事件流分割成时空立方体，用3D高斯核计算相似度
+- 距离公式：`d = K(e1,e1) + K(e2,e2) - 2K(e1,e2)` （核技巧）
+- 考虑极性分布加权（ON/OFF事件比例）
 
 #### **计数类指标 (Ratio)**  
 - **`event_count_ratio`**: 事件计数比例，估计数/真值数，理想值为1.0

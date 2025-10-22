@@ -14,6 +14,7 @@ import numpy as np
 from scipy.spatial import KDTree
 from typing import Dict, Any, List, Callable, Optional
 import warnings
+import math
 
 # Import torch and sklearn for voxel metrics (conditional import for robustness)
 try:
@@ -30,6 +31,211 @@ try:
 except ImportError:
     SKLEARN_AVAILABLE = False
     warnings.warn("scikit-learn not available, F1-based voxel metrics will be disabled")
+
+def cubes_3d_kernel_method(events, new_events, x_sigma, y_sigma, t_sigma, chunk_size=1000):
+    """
+    extern (MEMORY-OPTIMIZED VERSION - DOUBLE CHUNKING)
+
+    Computing inner product between spike cubes using 3d gaussian kernel method.
+    DOUBLE CHUNKED PROCESSING to avoid memory explosion with large event counts.
+
+    Inputs:
+    -------
+        events    - events include polarity, timestamp, x and y.
+        new_events    - events after changing operation.
+        x_sigma, y_sigma, t_sigma  - the parameters of 3d gaussian kernel.
+        chunk_size - process events in chunks to limit memory usage (default: 1000)
+
+    Outputs:
+    -------
+        inner_product    - the inner product between events and new_events.
+
+    Notes:
+    ------
+        Original implementation creates (N1 × N2) matrix which explodes with large N.
+        Example: 140K × 12M events = 1.68 trillion elements = 13.4 TB memory → CRASH
+
+        Solution 1: Single chunk - still risky
+        Example: 5000 × 12M events = 60M elements = 480 MB per chunk → May still crash
+
+        Solution 2: DOUBLE chunking (current implementation)
+        Example: 1000 × 1000 events = 1M elements = 8 MB per block → SAFE
+
+        Mathematical equivalence:
+        sum_{i=1}^{N1} sum_{j=1}^{N2} f(i,j) = sum_{chunk_i} sum_{chunk_j} sum_{i} sum_{j} f(i,j)
+    """
+    n1 = events.shape[1]
+    n2 = new_events.shape[1]
+
+    # Edge case: empty events
+    if n1 == 0 or n2 == 0:
+        return 0.0
+
+    # Calculate polarity scale once
+    ON_scale = np.sum(events[0, :] == 1) / n1
+    new_ON_scale = np.sum(new_events[0, :] == 1) / n2
+    polarity_scale = ON_scale * new_ON_scale + (1 - ON_scale) * (1 - new_ON_scale)
+
+    # DOUBLE chunking: chunk both events and new_events
+    total_sum = 0.0
+    num_chunks_1 = int(np.ceil(n1 / chunk_size))
+    num_chunks_2 = int(np.ceil(n2 / chunk_size))
+
+    for i in range(num_chunks_1):
+        start_i = i * chunk_size
+        end_i = min((i + 1) * chunk_size, n1)
+        events_chunk = events[:, start_i:end_i]  # shape: (4, chunk_size_i)
+
+        for j in range(num_chunks_2):
+            start_j = j * chunk_size
+            end_j = min((j + 1) * chunk_size, n2)
+            new_events_chunk = new_events[:, start_j:end_j]  # shape: (4, chunk_size_j)
+
+            # Compute pairwise distances for this block (chunk_size_i × chunk_size_j)
+            x_index = events_chunk[2, :][:, None] - new_events_chunk[2, :][None, :]
+            y_index = events_chunk[3, :][:, None] - new_events_chunk[3, :][None, :]
+            t_index = events_chunk[1, :][:, None] - new_events_chunk[1, :][None, :]
+
+            # Gaussian kernel
+            dist_matrix = np.exp(
+                - x_index**2 / (2 * x_sigma**2)
+                - y_index**2 / (2 * y_sigma**2)
+                - t_index**2 / (2 * t_sigma**2)
+            )
+
+            # Accumulate sum
+            total_sum += np.sum(dist_matrix)
+
+            # Free memory immediately
+            del x_index, y_index, t_index, dist_matrix
+
+    inner_product = polarity_scale * total_sum
+    return inner_product
+
+
+def cubes_3d_kernel_distance(events, new_events, x_sigma, y_sigma, t_sigma):
+    """
+    extern
+    
+    Computing distance between spike cubes using inner product in RKHS.
+
+    Inputs:
+    -------
+        events    - events include polarity, timestamp, x and y.
+        new_events    - events after changing operation.
+        x_sigma, y_sigma, t_sigma  - the parameters of 3d gaussian kernel.
+
+    Outputs:
+    -------
+        distance    - the distance between events and new_events.
+
+    """
+
+    if len(np.transpose(events)) <= 5 or len(np.transpose(new_events)) <= 5:
+        distance = 0
+    else:
+
+        distance = cubes_3d_kernel_method(events, events, x_sigma, y_sigma, t_sigma)
+        distance += cubes_3d_kernel_method(new_events, new_events, x_sigma, y_sigma, t_sigma)
+        distance -= 2 * cubes_3d_kernel_method(events, new_events, x_sigma, y_sigma, t_sigma)
+
+    return distance
+
+def events_to_spike_cubes(events, width, height, x_cube_size, y_cube_size, t_cube_size):
+    """
+    extern
+
+    events are split into spike cubes (VECTORIZED VERSION for 10x+ speedup).
+
+    Inputs:
+    -------
+        events    - the dataset of AER sensor including polarity(t), timestamp(ts), x coordinate(X) and y coordinate(Y).
+        width, height    - the width and height resolutions of dynamic vision sensor.
+        x_cube_size, y_cube_size, t_cube_size    - the width, height and temporal size of spike cubes.
+   Outputs:
+    -------
+        events_cubes    - the cubes of events (list of arrays).
+
+    """
+    # Vectorized index calculation - avoid Python loops
+    x_idx = (events[2, :] // x_cube_size).astype(int)
+    y_idx = (events[3, :] // y_cube_size).astype(int)
+    t_idx = (events[1, :] // t_cube_size).astype(int)
+
+    # Linear index for each event
+    x_bins = int(width / x_cube_size)
+    y_bins = int(height / y_cube_size)
+    linear_idx = x_idx + y_idx * x_bins + t_idx * x_bins * y_bins
+
+    # Determine number of cubes
+    num = int((width/x_cube_size)*(height/y_cube_size)*(math.ceil(np.max(events[1, :]) / t_cube_size)))
+    events_cube = [[] for _ in range(num)]
+
+    # Group events by cube index (vectorized)
+    unique_cubes = np.unique(linear_idx)
+    for cube_id in unique_cubes:
+        mask = (linear_idx == cube_id)
+        events_cube[cube_id] = events[:, mask].T.tolist()  # Convert to list of events
+
+    return events_cube
+
+## this is the new loss!
+def kernel_method_spike_cubes_loss(events, new_events, width=128, height=128, x_cube_size=32, y_cube_size=32, t_cube_size=5000, x_sigma=5, y_sigma=5, t_sigma=5000):
+    """ 
+        extern
+                
+        change some code to use EVK3 data as input
+        
+        3d gaussian kernel method  for spike cubes, such as polarity independent and polarity interference.
+
+        Inputs:
+        -------
+            events    - events include polarity, timestamp, x and y.
+            new_events    - events after changing operation.
+            width, height  - the width and height of dynamic vision sensor.
+            x_cube_size, y_cube_size, t_cube_size  - the size of spike cube.
+            x_sigma, y_sigma, t_sigma  - the 3d gaussian kernel parameters.
+
+        Outputs:
+        -------
+            distance    - the distance between events and new_events.
+
+    """
+    ##ADD IT TO fix dimension bug
+    evs1_float = np.zeros((4,events.shape[0]), dtype=np.float64)
+    evs2_float = np.zeros((4,new_events.shape[0]), dtype=np.float64)
+    
+    evs1_float[0, :] = events['p']
+    evs1_float[1, :] = events['t']
+    evs1_float[2, :] = events['x']
+    evs1_float[3, :] = events['y']
+    
+    evs2_float[0, :] = new_events['p']
+    evs2_float[1, :] = new_events['t']
+    evs2_float[2, :] = new_events['x']
+    evs2_float[3, :] = new_events['y']
+    #t_intervel = evs2_float[1, :][-1]-evs2_float[1, :][0]+evs1_float[1, :][-1]-evs1_float[1, :][0]
+    t_intervel = len(evs2_float[1, :])+len(evs1_float[1, :])
+    # evs1_float = np.transpose(evs1_float)
+    # evs2_float = np.transpose(evs2_float)
+
+    events_cube = events_to_spike_cubes(evs1_float, width, height, x_cube_size, y_cube_size, t_cube_size)
+    new_events_cubes = events_to_spike_cubes(evs2_float, width, height, x_cube_size, y_cube_size, t_cube_size)
+
+    distance = 0
+    for k in range(0, min(len(events_cube), len(new_events_cubes))):
+
+        events_data = np.transpose(np.array(events_cube[k]))
+        new_events_data = np.transpose(np.array(new_events_cubes[k]))
+
+        if len(events_data)==0 and len(new_events_data)==0:
+            distance += 0
+
+        else:
+            distance += cubes_3d_kernel_distance(events_data, new_events_data, x_sigma, y_sigma, t_sigma)
+    #it's better to return distance/T_intervel
+    return distance/t_intervel
+    # change to [0  - 1]
 
 
 def normalize_evs(evs: np.ndarray) -> np.ndarray:
@@ -566,3 +772,81 @@ if TORCH_AVAILABLE and SKLEARN_AVAILABLE:
         'Temporal & Polarity F1 score - collapse time and polarity (voxel-based)',
         'voxel'
     )
+
+# ============================================================================
+# Kernel Method Spike Cubes Loss Variants
+# ============================================================================
+
+def _create_kernel_loss_wrapper(width, height, x_cube_size, y_cube_size, t_cube_size,
+                                  x_sigma, y_sigma, t_sigma):
+    """Factory function to create kernel loss variant with specific parameters."""
+    def wrapper(events_est, events_gt):
+        # Auto-detect resolution if not specified
+        w = width if width else int(events_est['x'].max()) + 1
+        h = height if height else int(events_est['y'].max()) + 1
+
+        return kernel_method_spike_cubes_loss(
+            events_est, events_gt,
+            width=w, height=h,
+            x_cube_size=x_cube_size, y_cube_size=y_cube_size, t_cube_size=t_cube_size,
+            x_sigma=x_sigma, y_sigma=y_sigma, t_sigma=t_sigma
+        )
+    return wrapper
+
+# Variant 1: kernel_standard - Standard configuration for balanced spatial-temporal matching
+# Purpose: Default baseline with moderate sensitivity to both spatial and temporal errors
+# Use case: General-purpose evaluation, balanced view of reconstruction quality
+register_metric(
+    'kernel_standard',
+    _create_kernel_loss_wrapper(
+        width=640, height=480,  # EVK4 resolution
+        x_cube_size=32, y_cube_size=32, t_cube_size=5000,  # 32x32 spatial, 5ms temporal
+        x_sigma=5, y_sigma=5, t_sigma=5000  # Moderate Gaussian kernel width
+    ),
+    'RKHS kernel loss - standard config (32x32x5ms cubes, σ=5/5/5000) for balanced spatial-temporal matching',
+    'kernel'
+)
+
+# Variant 2: kernel_fine - Fine-grained configuration for detailed local structure
+# Purpose: High spatial-temporal resolution, sensitive to fine details and local errors
+# Use case: When precise event reconstruction is critical (e.g., sharp edges, fast motion)
+register_metric(
+    'kernel_fine',
+    _create_kernel_loss_wrapper(
+        width=640, height=480,
+        x_cube_size=16, y_cube_size=16, t_cube_size=2000,  # 16x16 spatial, 2ms temporal
+        x_sigma=3, y_sigma=3, t_sigma=2000  # Tighter Gaussian kernel
+    ),
+    'RKHS kernel loss - fine config (16x16x2ms cubes, σ=3/3/2000) for detailed local structure evaluation',
+    'kernel'
+)
+
+# Variant 3: kernel_spatial - Spatial-dominant configuration
+# Purpose: Emphasize spatial accuracy over temporal precision
+# Use case: When spatial reconstruction quality is more important than timing accuracy
+#           (e.g., evaluating flare removal effectiveness in spatial domain)
+register_metric(
+    'kernel_spatial',
+    _create_kernel_loss_wrapper(
+        width=640, height=480,
+        x_cube_size=32, y_cube_size=32, t_cube_size=10000,  # Larger temporal cubes (10ms)
+        x_sigma=3, y_sigma=3, t_sigma=10000  # Tight spatial, loose temporal kernel
+    ),
+    'RKHS kernel loss - spatial-focused (32x32x10ms cubes, σ=3/3/10000) emphasizing spatial accuracy',
+    'kernel'
+)
+
+# Variant 4: kernel_temporal - Temporal-dominant configuration
+# Purpose: Emphasize temporal precision over spatial accuracy
+# Use case: When timing accuracy is critical (e.g., high-speed motion, temporal synchronization)
+#           Useful for evaluating temporal alignment and event timing preservation
+register_metric(
+    'kernel_temporal',
+    _create_kernel_loss_wrapper(
+        width=640, height=480,
+        x_cube_size=64, y_cube_size=64, t_cube_size=2000,  # Larger spatial cubes, smaller temporal
+        x_sigma=10, y_sigma=10, t_sigma=1000  # Loose spatial, tight temporal kernel
+    ),
+    'RKHS kernel loss - temporal-focused (64x64x2ms cubes, σ=10/10/1000) emphasizing temporal precision',
+    'kernel'
+)

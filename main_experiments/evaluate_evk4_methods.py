@@ -6,8 +6,8 @@ Evaluates EVK4 methods against ground truth (target folder).
 Adapted from evaluate_all_methods.py for EVK4 data structure.
 
 Data structure:
-- Ground truth: Datasets/EVk4_result/target/ (evk4_*ms_sample*.h5)
-- Methods: Datasets/EVk4_result/{baseline,input,inputpfds,unet3d}/
+- Ground truth: Datasets/EVK4_result/target/ (defocus_*ms_sample*.h5)
+- Methods: Datasets/EVK4_result/{input,inputefr,inputpfda,inputpfdb,output_*,outputbaseline}/
 
 Features:
 - Comprehensive metrics: traditional (Chamfer, Gaussian) + voxel (PMSE, F1) + utility (ratios, overlap)
@@ -158,7 +158,7 @@ def get_sample_pairs_evk4(gt_folder: str, method_folders: List[str], num_samples
     return samples
 
 
-def evaluate_evk4_methods(evk4_dir: str = "Datasets/EVk4_result", 
+def evaluate_evk4_methods(evk4_dir: str = "Datasets/EVK4_result", 
                          num_samples: int = None,
                          selected_metrics: List[str] = None,
                          output_dir: str = "results",
@@ -324,8 +324,8 @@ def evaluate_evk4_methods(evk4_dir: str = "Datasets/EVk4_result",
 def main():
     """Main execution function."""
     parser = argparse.ArgumentParser(description="EVK4 Method Evaluation")
-    parser.add_argument('--evk4-dir', type=str, default='Datasets/EVk4_result',
-                       help='EVK4 directory path (default: Datasets/EVk4_result)')
+    parser.add_argument('--evk4-dir', type=str, default='Datasets/EVK4_result',
+                       help='EVK4 directory path (default: Datasets/EVK4_result)')
     parser.add_argument('--num-samples', type=int,
                        help='Limit number of samples to evaluate (default: all)')
     parser.add_argument('--metrics', type=str, nargs='+',

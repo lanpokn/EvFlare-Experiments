@@ -24,7 +24,12 @@
       "Bash(export:*)",
       "Bash(nm:*)",
       "Bash(sudo mkdir:*)",
-      "Bash(sudo cp:*)"
+      "Bash(sudo cp:*)",
+      "Read(//mnt/e/2025/event_flick_flare/experiments/main_experiments/**)",
+      "Read(//mnt/e/2025/event_flick_flare/datasets/**)",
+      "Read(//mnt/e/BaiduSyncdisk/2025/event_flick_flare/datasets/**)",
+      "Read(//mnt/e/**)",
+      "Bash(python3:*)"
     ],
     "deny": []
   }

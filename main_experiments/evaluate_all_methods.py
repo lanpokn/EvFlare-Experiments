@@ -2,13 +2,13 @@
 """
 Multi-Method H5 Event Evaluation Script
 
-Evaluates all methods against ground truth (background_with_light_events_test).
+Evaluates all methods against ground truth (target folder).
 Automatically discovers method folders and generates comprehensive comparison table.
 
 Features:
-- Ground truth: background_with_light_events_test/ (*_bg_light.h5)
-- Methods: All other folders in simu/ directory (any naming pattern)
-- Only computes chamfer_distance and gaussian_distance
+- Ground truth: target/ (*_bg_light.h5)
+- Methods: All other folders in simu/ directory (folder name = method name)
+- Default metrics: chamfer_distance, gaussian_distance, pger, pmse_2, pmse_4, rf1, tf1, tpf1
 - Results saved to results/ folder with method comparison table
 - Supports dynamic addition of new method folders
 
@@ -44,7 +44,7 @@ def discover_methods_and_gt(simu_dir: str) -> Tuple[str, List[str]]:
         raise FileNotFoundError(f"Simu directory not found: {simu_dir}")
     
     # Ground truth folder (fixed name)
-    gt_folder_name = "background_with_light_events_test"
+    gt_folder_name = "target"
     gt_folder_path = simu_path / gt_folder_name
     
     if not gt_folder_path.exists():
