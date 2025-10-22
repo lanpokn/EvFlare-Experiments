@@ -29,7 +29,7 @@ import pandas as pd
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from data_loader import load_events
-from metrics import calculate_metrics, get_available_metrics
+from metrics import calculate_metrics, get_available_metrics, set_kernel_config
 
 
 def discover_methods_and_gt(simu_dir: str) -> Tuple[str, List[str]]:
@@ -374,9 +374,19 @@ def main():
     
     parser.add_argument('--quiet', '-q', action='store_true',
                        help='Reduce verbosity')
-    
+
+    # Kernel configuration arguments
+    parser.add_argument('--kernel-sampling', type=str, choices=['on', 'off'], default='off',
+                       help='Enable/disable kernel sampling (default: off - fine cubes don\'t need sampling)')
+
+    parser.add_argument('--kernel-max-events', type=int, default=10000,
+                       help='Max events per cube before sampling (default: 10000)')
+
+    parser.add_argument('--kernel-verbose', type=str, choices=['on', 'off'], default='off',
+                       help='Show kernel progress tracking (default: off)')
+
     args = parser.parse_args()
-    
+
     try:
         # Handle --list-metrics
         if args.list_metrics:
@@ -385,7 +395,14 @@ def main():
             for name, info in available_metrics.items():
                 print(f"  {name}: {info['description']} (category: {info['category']})")
             return
-        
+
+        # Configure kernel before running evaluation
+        set_kernel_config(
+            enabled=(args.kernel_sampling == 'on'),
+            max_events=args.kernel_max_events,
+            verbose=(args.kernel_verbose == 'on')
+        )
+
         results_df = run_multi_method_evaluation(
             simu_dir=args.simu_dir,
             max_samples=args.num_samples,

@@ -29,7 +29,8 @@
       "Read(//mnt/e/2025/event_flick_flare/datasets/**)",
       "Read(//mnt/e/BaiduSyncdisk/2025/event_flick_flare/datasets/**)",
       "Read(//mnt/e/**)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(timeout:*)"
     ],
     "deny": []
   }
