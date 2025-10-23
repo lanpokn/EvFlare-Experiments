@@ -320,7 +320,8 @@ def kernel_method_spike_cubes_loss(events, new_events, width=128, height=128, x_
     evs2_float[2, :] = new_events['x']
     evs2_float[3, :] = new_events['y']
 
-    t_intervel = len(evs2_float[1, :]) + len(evs1_float[1, :])
+    # Normalize by GT event count only (fixed baseline for fair comparison)
+    n_gt = len(evs2_float[1, :])
 
     # Split into cubes
     cube_split_start = time.time()
@@ -389,8 +390,8 @@ def kernel_method_spike_cubes_loss(events, new_events, width=128, height=128, x_
         print(f"  [Kernel] ✓ Completed in {total_time:.2f}s (split: {cube_split_time:.2f}s, compute: {compute_time:.2f}s)")
         print(f"  [Kernel] Non-empty cubes: {non_empty_cubes}/{num_cubes} ({non_empty_cubes/num_cubes*100:.1f}%)")
 
-    # Normalize by total event count
-    return distance / t_intervel
+    # Normalize by GT event count only (fixed baseline, avoids bias from varying N_est)
+    return distance / n_gt
 
 
 def normalize_evs(evs: np.ndarray) -> np.ndarray:

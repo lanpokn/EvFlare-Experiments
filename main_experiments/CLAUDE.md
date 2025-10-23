@@ -735,6 +735,49 @@ python evaluate_all_methods.py \
 - **数学等价性**：✅ 分块只改变计算顺序，结果完全一致
 - **配置固化**：保证simu和EVK4使用完全相同的kernel配置
 
+### ✅ **已修复：Kernel归一化Bug** (2025-10-23)
+**位置**：`metrics.py:324, 394`
+
+**原问题代码**：
+```python
+t_intervel = len(evs2_float[1, :]) + len(evs1_float[1, :])  # N_gt + N_est (错误!)
+return distance / t_intervel
+```
+
+**Bug分析**：
+1. **归一化错误**：除以`(N_gt + N_est)`导致逻辑颠倒
+   - **带炫光的input**：事件多 → 分母大 → 距离被压低 → 排名反常高（❌）
+   - **去炫光后的output**：事件少 → 分母小 → 距离被放大 → 排名反常低（❌）
+   - **核心问题**：分母随N_est变化，惩罚了"正确去除炫光"的行为
+
+2. **数学冲突**：
+   - Kernel距离`d² = K(x,x) - 2K(x,y) + K(y,y)`已是RKHS归一化距离
+   - 内部已有极性权重归一化（`cubes_3d_kernel_method`的`polarity_scale`）
+   - 再除以事件总数缺乏理论依据
+
+3. **实际影响**：
+   - EVK4评估中，未去炫光的input排名异常高
+   - 成功去炫光的output_nolight被错误惩罚
+
+**修复方案（已采用方案2）**：
+```python
+# Normalize by GT event count only (fixed baseline for fair comparison)
+n_gt = len(evs2_float[1, :])
+return distance / n_gt
+```
+
+**修复理由**：
+- ✅ **固定基准**：所有方法使用相同的分母（N_gt），确保公平比较
+- ✅ **类似其他指标**：与Chamfer/Gaussian的单向归一化逻辑一致
+- ✅ **消除偏差**：不会因去除炫光事件而改变评分尺度
+- ✅ **保持可比性**：不同样本间的距离仍可比较（除以各自的N_gt）
+
+**其他候选方案（未采用）**：
+- **方案1**：`return distance` - 完全移除归一化，但不同样本间数值范围差异大
+- **方案3**：`return distance / non_empty_cubes` - 用cube数归一化，但cube数本身随分布变化
+
+**状态**：✅ **已修复并测试**
+
 ## 项目优势
 - **完整性**: 支持真实 DVS 相机数据格式，包括DAVIS和EVK4，已验证可用
 - **专业性**: 包含时间对齐敏感性分析功能，支持微秒级精度
