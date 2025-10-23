@@ -847,6 +847,51 @@ def calculate_tpf1(events_est: np.ndarray, events_gt: np.ndarray) -> float:
     """Temporal & Polarity F1 score - collapse time and polarity dimensions.""" 
     return calculate_f1_metrics(events_est, events_gt)['TPF1']
 
+def calculate_voxel_mse(events_est: np.ndarray, events_gt: np.ndarray) -> float:
+    """
+    Calculate direct Voxel Mean Squared Error without pooling.
+
+    This is the strictest voxel-based metric, computing MSE directly on
+    the voxel representation without any spatial downsampling.
+
+    Args:
+        events_est: Estimated event stream
+        events_gt: Ground truth event stream
+
+    Returns:
+        float: Voxel MSE value (lower is better)
+
+    Note:
+        - Most strict voxel metric (no pooling tolerance)
+        - Sensitive to single-pixel misalignment
+        - Complements PMSE_2 and PMSE_4 for multi-scale evaluation
+    """
+    if not TORCH_AVAILABLE:
+        return float('inf')
+
+    try:
+        # Convert to voxel chunks
+        voxel_chunks_est, voxel_chunks_gt = _prepare_voxel_pair(events_est, events_gt)
+
+        if len(voxel_chunks_est) == 0 or len(voxel_chunks_gt) == 0:
+            return float('inf')
+
+        chunk_mse_scores = []
+
+        for voxel_est, voxel_gt in zip(voxel_chunks_est, voxel_chunks_gt):
+            # Direct MSE calculation on raw voxel (no pooling)
+            import torch.nn.functional as F
+            mse_loss = F.mse_loss(voxel_est, voxel_gt)
+            chunk_mse_scores.append(mse_loss.item())
+
+        # Average across all chunks
+        return float(np.mean(chunk_mse_scores))
+
+    except Exception as e:
+        warnings.warn(f"Voxel MSE calculation failed: {e}")
+        return float('inf')
+
+
 def calculate_pmse_2(events_est: np.ndarray, events_gt: np.ndarray) -> float:
     """PMSE with pool size 2."""
     return calculate_pmse(events_est, events_gt, pool_size=2)
@@ -895,33 +940,40 @@ register_metric(
 # Register voxel-based metrics (conditional on dependencies)
 if TORCH_AVAILABLE and SKLEARN_AVAILABLE:
     register_metric(
+        'voxel_mse',
+        calculate_voxel_mse,
+        'Direct Voxel MSE without pooling - strictest voxel metric (voxel-based)',
+        'voxel'
+    )
+
+    register_metric(
         'pmse_2',
         calculate_pmse_2,
         'Pooling Mean Squared Error with pool size 2 (voxel-based)',
         'voxel'
     )
-    
+
     register_metric(
-        'pmse_4', 
+        'pmse_4',
         calculate_pmse_4,
         'Pooling Mean Squared Error with pool size 4 (voxel-based)',
         'voxel'
     )
-    
+
     register_metric(
         'rf1',
         calculate_rf1,
         'Raw F1 score - no dimension collapse (voxel-based)',
         'voxel'
     )
-    
+
     register_metric(
         'tf1',
         calculate_tf1,
-        'Temporal F1 score - collapse time dimension (voxel-based)', 
+        'Temporal F1 score - collapse time dimension (voxel-based)',
         'voxel'
     )
-    
+
     register_metric(
         'tpf1',
         calculate_tpf1,

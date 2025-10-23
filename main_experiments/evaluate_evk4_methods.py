@@ -17,7 +17,7 @@ Features:
 
 Default metrics:
 - Traditional: chamfer_distance, gaussian_distance
-- Voxel PMSE: pmse_2, pmse_4 
+- Voxel MSE: voxel_mse, pmse_2, pmse_4
 - Voxel F1: rf1, tf1, tpf1
 - Utility: event_count_ratio, temporal_overlap
 
@@ -244,8 +244,8 @@ def evaluate_evk4_methods(evk4_dir: str = "Datasets/EVK4_result",
     default_metrics = [
         # 传统距离指标
         'chamfer_distance', 'gaussian_distance',
-        # Voxel PMSE指标  
-        'pmse_2', 'pmse_4',
+        # Voxel MSE指标 (voxel_mse最严格，pmse_2中等，pmse_4最宽松)
+        'voxel_mse', 'pmse_2', 'pmse_4',
         # Voxel F1指标
         'rf1', 'tf1', 'tpf1',
         # 其他有用指标

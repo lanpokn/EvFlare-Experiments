@@ -149,7 +149,7 @@ deactivate
   - **配对逻辑**: 通过文件名前缀匹配，如 `composed_00470_bg_light.h5` 对应 `composed_00470_bg_flare.h5`
   - **评估原则**: 计算各种方法相对于真值的指标，方法间不互相比较
 - **特点**:
-  - 默认计算8个指标：chamfer_distance, gaussian_distance, pger, pmse_2, pmse_4, rf1, tf1, tpf1
+  - 默认计算9个指标：chamfer_distance, gaussian_distance, pger, voxel_mse, pmse_2, pmse_4, rf1, tf1, tpf1
   - 支持通过 `--metrics` 参数自定义指标组合
   - 结果统一保存到 `results/multi_method_evaluation_results.csv`
   - 自动生成包含AVERAGE行的CSV文件，适合论文直接使用
@@ -303,7 +303,7 @@ python test_aedat4_loading.py
 python evaluate_all_methods.py --output results
 
 # 纯voxel组合：现代评估方法
-python evaluate_all_methods.py --metrics pmse_2 pmse_4 rf1 tf1 tpf1
+python evaluate_all_methods.py --metrics voxel_mse pmse_2 pmse_4 rf1 tf1 tpf1
 
 # 全面对比组合：覆盖所有评估维度  
 python evaluate_all_methods.py --metrics chamfer_distance gaussian_distance tf1 tpf1 pmse_2 temporal_overlap
@@ -314,7 +314,7 @@ python evaluate_all_methods.py --metrics chamfer_distance gaussian_distance
 
 #### **📊 指标优劣性总结**
 - **📈 越高越好**: tf1, tpf1, rf1, temporal_overlap
-- **📉 越低越好**: chamfer_distance, gaussian_distance, pmse_2, pmse_4  
+- **📉 越低越好**: chamfer_distance, gaussian_distance, voxel_mse, pmse_2, pmse_4
 - **📊 比例指标**: event_count_ratio, pger (理想值≈1.0)
 
 #### **⚠️ 距离指标优化** ✅
@@ -420,10 +420,10 @@ python evaluate_evk4_methods.py --quiet --output results
 - **数据清洗**: Simu数据已删除composed_01000-01004无效样本，当前35个有效样本
 
 ### **默认指标详解**
-**EVK4评估默认包含9个指标**：
-- **传统指标**: chamfer_distance, gaussian_distance  
-- **Voxel PMSE**: pmse_2, pmse_4
-- **Voxel F1**: rf1, tf1, tpf1 
+**EVK4评估默认包含10个指标**：
+- **传统指标**: chamfer_distance, gaussian_distance
+- **Voxel MSE**: voxel_mse, pmse_2, pmse_4
+- **Voxel F1**: rf1, tf1, tpf1
 - **实用指标**: event_count_ratio, temporal_overlap
 
 ## 环境管理
@@ -486,9 +486,10 @@ python evaluate_all_methods.py --metrics chamfer_distance my_voxel_metric
 - **`temporal_overlap`**: 时间覆盖重叠率，衡量两事件流时间窗口的重叠程度，范围[0,1]
 
 #### **Voxel类指标**
-**PMSE系列 (Lower is Better)**:
-- **`pmse_2`**: 池化均方误差(pool=2)，对voxel进行2×2池化后计算MSE，减少空间错位敏感度
-- **`pmse_4`**: 池化均方误差(pool=4)，对voxel进行4×4池化后计算MSE，更关注宏观结构
+**MSE系列 (Lower is Better, 严格度递减)**:
+- **`voxel_mse`**: 直接Voxel MSE，无池化，最严格，对单像素错位高度敏感
+- **`pmse_2`**: 池化均方误差(pool=2)，对voxel进行2×2池化后计算MSE，中等容忍度
+- **`pmse_4`**: 池化均方误差(pool=4)，对voxel进行4×4池化后计算MSE，高容忍度，关注宏观结构
 
 **F1系列 (Higher is Better, 范围[0,1])**:
 - **`rf1`**: Raw F1分数，最严格，直接在5D voxel(B,P,T,H,W)上计算，要求精确的时空极性匹配
@@ -496,10 +497,10 @@ python evaluate_all_methods.py --metrics chamfer_distance my_voxel_metric
 - **`tpf1`**: Temporal&Polarity F1分数，最宽松，坍缩时间和极性维度，只要求空间位置匹配
 
 #### **算法验证结果 ✅**
-- **边界情况**: 空事件→F1=0.0/PMSE=∞，完全正确
-- **完美匹配**: 相同事件→F1=1.0/PMSE=0.0/Chamfer=0.0，完全正确  
+- **边界情况**: 空事件→F1=0.0/MSE=∞，完全正确
+- **完美匹配**: 相同事件→F1=1.0/MSE=0.0/Chamfer=0.0，完全正确
 - **数值范围**: 所有F1指标严格在[0,1]范围内
-- **理论一致性**: RF1≤TF1≤TPF1，PMSE_4≤PMSE_2，符合预期
+- **理论一致性**: RF1≤TF1≤TPF1，Voxel_MSE≥PMSE_2≥PMSE_4 (池化越大越宽容)，符合预期
 
 #### **技术特点**
 - **分块处理**: 100ms文件→5×20ms voxel块，避免内存问题
