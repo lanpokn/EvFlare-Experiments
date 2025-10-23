@@ -323,6 +323,47 @@ python evaluate_all_methods.py --metrics chamfer_distance gaussian_distance
 - **去炫光优化**：避免因移除炫光事件而被错误惩罚，更公平评估去炫光效果
 - **实现验证**：✅ 参数顺序正确，estimated events查询ground truth树
 
+### **断点续存机制** ✅ (2025-10-23新增)
+
+**核心功能**：
+- **自动checkpoint**: 每处理完1个样本立即保存到CSV
+- **智能恢复**: 启动时自动检测已完成样本，跳过继续
+- **零配置**: 默认开启，无需额外参数
+- **中断安全**: Ctrl+C中断后可直接重新运行继续
+
+**工作原理**：
+1. **增量保存**: 每个样本计算完立即追加到`results/xxx_evaluation_results.csv`
+2. **启动检测**: 脚本启动时检查CSV，提取已完成的`sample_id`
+3. **跳过已完成**: 只处理尚未完成的样本，避免重复计算
+4. **结果合并**: 自动合并历史数据和新数据，生成完整报告
+
+**使用示例**：
+```bash
+# 首次运行 - 开始评估35个样本
+python evaluate_all_methods.py --output results
+
+# ... 中断后（比如完成了10个样本）...
+
+# 重新运行 - 自动从第11个样本继续
+python evaluate_all_methods.py --output results
+# 输出: "✓ Checkpoint loaded: 10 samples already completed"
+#       "Remaining to process: 25"
+
+# EVK4评估也支持相同机制
+python evaluate_evk4_methods.py --output results
+```
+
+**技术细节**：
+- **文件格式**: 标准CSV，与最终结果完全相同格式
+- **AVERAGE行处理**: 自动过滤掉checkpoint中的AVERAGE行，避免重复
+- **进度显示**: 自动显示 `[已完成+当前处理中/总数]`
+- **无损失**: 即使计算到99%中断，也能保留所有已完成的工作
+
+**关键优势**：
+- **时间宝贵**: kernel指标单样本可能耗时数分钟，断点续存避免重复浪费
+- **资源高效**: 长时间运行的评估可以分批完成，灵活安排计算资源
+- **容错能力**: 网络断连、系统崩溃、手动中断都不会丢失进度
+
 ### **环境准备（首次使用）**
 ```bash
 cd /mnt/e/2025/event_flick_flare/experiments/main_experiments

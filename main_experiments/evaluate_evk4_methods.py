@@ -158,15 +158,73 @@ def get_sample_pairs_evk4(gt_folder: str, method_folders: List[str], num_samples
     return samples
 
 
-def evaluate_evk4_methods(evk4_dir: str = "Datasets/EVK4_result", 
+def load_checkpoint_evk4(checkpoint_file: str, quiet: bool = False) -> Tuple[pd.DataFrame, set]:
+    """Load checkpoint data if exists.
+
+    Returns:
+        Tuple of (existing_df, completed_sample_ids)
+    """
+    checkpoint_path = Path(checkpoint_file)
+
+    if not checkpoint_path.exists():
+        if not quiet:
+            print("No checkpoint found, starting fresh evaluation")
+        return None, set()
+
+    try:
+        existing_df = pd.read_csv(checkpoint_path)
+        # Filter out AVERAGE row if present
+        existing_df = existing_df[existing_df['sample_id'] != 'AVERAGE']
+        completed_ids = set(existing_df['sample_id'].tolist())
+
+        if not quiet:
+            print(f"✓ Checkpoint loaded: {len(completed_ids)} samples already completed")
+            print(f"  Resuming from checkpoint: {checkpoint_path}")
+
+        return existing_df, completed_ids
+    except Exception as e:
+        if not quiet:
+            print(f"Warning: Failed to load checkpoint: {e}")
+        return None, set()
+
+
+def save_incremental_result_evk4(result_row: Dict, checkpoint_file: str, is_first: bool = False):
+    """Save single result row incrementally to CSV.
+
+    Args:
+        result_row: Dictionary with sample results
+        checkpoint_file: Path to checkpoint CSV
+        is_first: Whether this is the first row (write header)
+    """
+    checkpoint_path = Path(checkpoint_file)
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Convert to DataFrame
+    df = pd.DataFrame([result_row])
+
+    # Write with or without header
+    mode = 'w' if is_first else 'a'
+    df.to_csv(checkpoint_path, mode=mode, header=is_first, index=False)
+
+
+def evaluate_evk4_methods(evk4_dir: str = "Datasets/EVK4_result",
                          num_samples: int = None,
                          selected_metrics: List[str] = None,
                          output_dir: str = "results",
-                         quiet: bool = False) -> pd.DataFrame:
+                         quiet: bool = False,
+                         checkpoint_file: str = None) -> pd.DataFrame:
     """
-    Evaluate all EVK4 methods against ground truth.
+    Evaluate all EVK4 methods against ground truth with checkpoint support.
+
+    Args:
+        evk4_dir: EVK4 directory path
+        num_samples: Limit number of samples
+        selected_metrics: Metrics to calculate
+        output_dir: Output directory
+        quiet: Reduce verbosity
+        checkpoint_file: Path to checkpoint file (enables resume)
     """
-    
+
     if not quiet:
         print("="*80)
         print("EVK4 METHOD EVALUATION")
@@ -174,7 +232,7 @@ def evaluate_evk4_methods(evk4_dir: str = "Datasets/EVK4_result",
         print(f"EVK4 directory: {evk4_dir}")
         if num_samples:
             print(f"Sample limit: {num_samples}")
-    
+
     # Create output directory
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     
@@ -212,20 +270,40 @@ def evaluate_evk4_methods(evk4_dir: str = "Datasets/EVK4_result",
     
     # Get sample pairs
     samples = get_sample_pairs_evk4(gt_folder, method_folders, num_samples)
-    
+
+    # Load checkpoint if enabled
+    existing_df = None
+    completed_ids = set()
+    if checkpoint_file:
+        existing_df, completed_ids = load_checkpoint_evk4(checkpoint_file, quiet)
+
+    # Filter out already completed samples
+    remaining_samples = [s for s in samples if s['sample_id'] not in completed_ids]
+
     if not quiet:
-        print(f"Evaluating {len(samples)} samples across {len(method_names)} methods")
+        print(f"Total samples: {len(samples)}")
+        if checkpoint_file:
+            print(f"Already completed: {len(completed_ids)}")
+            print(f"Remaining to process: {len(remaining_samples)}")
         print("Starting evaluation...")
-    
-    # Evaluate each sample
+
+    # If all samples completed, return existing results
+    if checkpoint_file and len(remaining_samples) == 0:
+        if not quiet:
+            print("✓ All samples already completed!")
+        return existing_df
+
+    # Evaluate each remaining sample
     results = []
     start_time = time.time()
-    
-    for i, sample in enumerate(samples):
+
+    for i, sample in enumerate(remaining_samples):
         sample_id = sample['sample_id']
-        
+
         if not quiet:
-            print(f"\n[{i+1}/{len(samples)}] Processing sample: {sample_id}")
+            completed_count = len(completed_ids) + i
+            total_count = len(samples)
+            print(f"\n[{completed_count+1}/{total_count}] Processing sample: {sample_id}")
         
         # Load ground truth
         try:
@@ -274,9 +352,18 @@ def evaluate_evk4_methods(evk4_dir: str = "Datasets/EVK4_result",
                     result_row[f"{method_name}_{metric}"] = np.nan
         
         results.append(result_row)
-    
-    # Create DataFrame
-    df = pd.DataFrame(results)
+
+        # Save checkpoint incrementally
+        if checkpoint_file:
+            is_first_write = (existing_df is None and i == 0)
+            save_incremental_result_evk4(result_row, checkpoint_file, is_first=is_first_write)
+
+    # Combine existing and new results
+    if existing_df is not None:
+        new_df = pd.DataFrame(results)
+        df = pd.concat([existing_df, new_df], ignore_index=True)
+    else:
+        df = pd.DataFrame(results)
     
     # Calculate averages
     numeric_columns = [col for col in df.columns if col != 'sample_id']
@@ -347,12 +434,16 @@ def main():
         return
     
     try:
+        # Enable checkpoint by default (save to output directory)
+        checkpoint_path = Path(args.output) / "evk4_evaluation_results.csv"
+
         df = evaluate_evk4_methods(
             evk4_dir=args.evk4_dir,
             num_samples=args.num_samples,
             selected_metrics=args.metrics,
             output_dir=args.output,
-            quiet=args.quiet
+            quiet=args.quiet,
+            checkpoint_file=str(checkpoint_path)
         )
         
         if not args.quiet:

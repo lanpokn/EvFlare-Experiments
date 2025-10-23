@@ -186,12 +186,70 @@ def evaluate_sample_across_methods(sample_id: str, file_matches: Dict[str, str],
         return {'sample_id': sample_id, 'error': str(e)}
 
 
-def run_multi_method_evaluation(simu_dir: str = "Datasets/simu", 
-                               max_samples: int = None, 
+def load_checkpoint(checkpoint_file: str, verbose: bool = True) -> Tuple[pd.DataFrame, set]:
+    """Load checkpoint data if exists.
+
+    Returns:
+        Tuple of (existing_df, completed_sample_ids)
+    """
+    checkpoint_path = Path(checkpoint_file)
+
+    if not checkpoint_path.exists():
+        if verbose:
+            print("No checkpoint found, starting fresh evaluation")
+        return None, set()
+
+    try:
+        existing_df = pd.read_csv(checkpoint_path)
+        # Filter out AVERAGE row if present
+        existing_df = existing_df[existing_df['sample_id'] != 'AVERAGE']
+        completed_ids = set(existing_df['sample_id'].tolist())
+
+        if verbose:
+            print(f"✓ Checkpoint loaded: {len(completed_ids)} samples already completed")
+            print(f"  Resuming from checkpoint: {checkpoint_path}")
+
+        return existing_df, completed_ids
+    except Exception as e:
+        if verbose:
+            print(f"Warning: Failed to load checkpoint: {e}")
+        return None, set()
+
+
+def save_incremental_result(result_row: Dict, checkpoint_file: str, is_first: bool = False):
+    """Save single result row incrementally to CSV.
+
+    Args:
+        result_row: Dictionary with sample results
+        checkpoint_file: Path to checkpoint CSV
+        is_first: Whether this is the first row (write header)
+    """
+    checkpoint_path = Path(checkpoint_file)
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Convert to DataFrame
+    df = pd.DataFrame([result_row])
+
+    # Write with or without header
+    mode = 'w' if is_first else 'a'
+    df.to_csv(checkpoint_path, mode=mode, header=is_first, index=False)
+
+
+def run_multi_method_evaluation(simu_dir: str = "Datasets/simu",
+                               max_samples: int = None,
                                metric_names: List[str] = None,
-                               verbose: bool = True) -> pd.DataFrame:
-    """Run evaluation across all methods."""
-    
+                               verbose: bool = True,
+                               checkpoint_file: str = None) -> pd.DataFrame:
+    """Run evaluation across all methods with checkpoint support.
+
+    Args:
+        simu_dir: Directory containing method folders
+        max_samples: Maximum number of samples to process
+        metric_names: List of specific metrics to calculate
+        verbose: Print progress information
+        checkpoint_file: Path to checkpoint file (enables resume capability)
+    """
+
     if verbose:
         print("="*80)
         print("MULTI-METHOD H5 EVENT EVALUATION")
@@ -201,52 +259,81 @@ def run_multi_method_evaluation(simu_dir: str = "Datasets/simu",
         else:
             print("Using default metrics: chamfer_distance, gaussian_distance, pger, pmse_2, pmse_4, rf1, tf1, tpf1")
             print(f"Available metrics: {', '.join(get_available_metrics().keys())}")
-    
+
     # Discover methods and ground truth
     gt_folder, method_folders = discover_methods_and_gt(simu_dir)
     method_names = [Path(f).name for f in method_folders]
-    
+
     if verbose:
         print(f"Ground truth: {Path(gt_folder).name}")
         print(f"Methods found: {len(method_names)}")
         for name in method_names:
             print(f"  - {name}")
         print()
-    
+
     # Get all sample IDs from ground truth folder
     sample_ids = extract_sample_ids_from_folder(gt_folder)
-    
+
     if max_samples is not None and len(sample_ids) > max_samples:
         sample_ids = sample_ids[:max_samples]
         if verbose:
             print(f"Limited to first {max_samples} samples")
-    
+
+    # Load checkpoint if enabled
+    existing_df = None
+    completed_ids = set()
+    if checkpoint_file:
+        existing_df, completed_ids = load_checkpoint(checkpoint_file, verbose)
+
+    # Filter out already completed samples
+    remaining_ids = [sid for sid in sample_ids if sid not in completed_ids]
+
     if verbose:
-        print(f"Processing {len(sample_ids)} samples")
+        print(f"Total samples: {len(sample_ids)}")
+        if checkpoint_file:
+            print(f"Already completed: {len(completed_ids)}")
+            print(f"Remaining to process: {len(remaining_ids)}")
         print()
-    
-    # Evaluate each sample
+
+    # If all samples completed, return existing results
+    if checkpoint_file and len(remaining_ids) == 0:
+        if verbose:
+            print("✓ All samples already completed!")
+        return existing_df
+
+    # Evaluate each remaining sample
     results = []
     start_time = time.time()
-    
-    for i, sample_id in enumerate(sample_ids):
+
+    for i, sample_id in enumerate(remaining_ids):
         if verbose:
-            print(f"[{i+1}/{len(sample_ids)}] {sample_id}")
-        
+            completed_count = len(completed_ids) + i
+            total_count = len(sample_ids)
+            print(f"[{completed_count+1}/{total_count}] {sample_id}")
+
         # Find matching files across all folders
         file_matches = find_matching_files(sample_id, gt_folder, method_folders)
-        
+
         if verbose:
             print(f"    Found files: {len(file_matches)-1} methods + GT")
-        
+
         # Evaluate this sample
         sample_result = evaluate_sample_across_methods(sample_id, file_matches, metric_names, verbose)
         results.append(sample_result)
-    
+
+        # Save checkpoint incrementally
+        if checkpoint_file:
+            is_first_write = (existing_df is None and i == 0)
+            save_incremental_result(sample_result, checkpoint_file, is_first=is_first_write)
+
     total_time = time.time() - start_time
-    
-    # Convert to DataFrame
-    df = pd.DataFrame(results)
+
+    # Combine existing and new results
+    if existing_df is not None:
+        new_df = pd.DataFrame(results)
+        df = pd.concat([existing_df, new_df], ignore_index=True)
+    else:
+        df = pd.DataFrame(results)
     
     # Calculate averages for each method - use ALL columns, not just selected metrics
     method_columns = []
@@ -403,11 +490,15 @@ def main():
             verbose=(args.kernel_verbose == 'on')
         )
 
+        # Enable checkpoint by default (save to output directory)
+        checkpoint_path = Path(args.output) / "multi_method_evaluation_results.csv"
+
         results_df = run_multi_method_evaluation(
             simu_dir=args.simu_dir,
             max_samples=args.num_samples,
             metric_names=args.metrics,
-            verbose=not args.quiet
+            verbose=not args.quiet,
+            checkpoint_file=str(checkpoint_path)
         )
         
         save_results(results_df, args.output, not args.quiet)
