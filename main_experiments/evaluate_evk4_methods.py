@@ -212,7 +212,8 @@ def evaluate_evk4_methods(evk4_dir: str = "Datasets/EVK4_result",
                          selected_metrics: List[str] = None,
                          output_dir: str = "results",
                          quiet: bool = False,
-                         checkpoint_file: str = None) -> pd.DataFrame:
+                         checkpoint_file: str = None,
+                         target_method: str = None) -> pd.DataFrame:
     """
     Evaluate all EVK4 methods against ground truth with checkpoint support.
 
@@ -223,6 +224,7 @@ def evaluate_evk4_methods(evk4_dir: str = "Datasets/EVK4_result",
         output_dir: Output directory
         quiet: Reduce verbosity
         checkpoint_file: Path to checkpoint file (enables resume)
+        target_method: If specified, only evaluate this method (default: all methods)
     """
 
     if not quiet:
@@ -239,6 +241,10 @@ def evaluate_evk4_methods(evk4_dir: str = "Datasets/EVK4_result",
     # Discover methods and ground truth
     gt_folder, method_folders = discover_evk4_methods_and_gt(evk4_dir)
     method_names = [Path(folder).name for folder in method_folders]
+
+    # Validate target_method if specified
+    if target_method and target_method not in method_names:
+        raise ValueError(f"Method '{target_method}' not found. Available: {', '.join(method_names)}")
     
     # Get available metrics with comprehensive defaults
     default_metrics = [
@@ -319,8 +325,12 @@ def evaluate_evk4_methods(evk4_dir: str = "Datasets/EVK4_result",
         
         # Evaluate each method
         for method_name in method_names:
+            # If target_method specified, skip other methods
+            if target_method and method_name != target_method:
+                continue
+
             method_file_key = f"{method_name}_file"
-            
+
             if method_file_key not in sample:
                 # Fill with NaN for missing methods
                 for metric in selected_metrics:
@@ -421,6 +431,8 @@ def main():
                        help='Output directory (default: results)')
     parser.add_argument('--quiet', action='store_true',
                        help='Reduce output verbosity')
+    parser.add_argument('--method', type=str,
+                       help='Only evaluate this specific method (e.g., inputefr). Default: all methods')
     parser.add_argument('--list-metrics', action='store_true',
                        help='List available metrics and exit')
     
@@ -443,7 +455,8 @@ def main():
             selected_metrics=args.metrics,
             output_dir=args.output,
             quiet=args.quiet,
-            checkpoint_file=str(checkpoint_path)
+            checkpoint_file=str(checkpoint_path),
+            target_method=args.method
         )
         
         if not args.quiet:

@@ -115,36 +115,42 @@ def find_matching_files(sample_id: str, gt_folder: str, method_folders: List[str
     return matches
 
 
-def evaluate_sample_across_methods(sample_id: str, file_matches: Dict[str, str], 
-                                  metric_names: List[str] = None, verbose: bool = False) -> Dict:
+def evaluate_sample_across_methods(sample_id: str, file_matches: Dict[str, str],
+                                  metric_names: List[str] = None, verbose: bool = False,
+                                  target_method: str = None) -> Dict:
     """
     Evaluate one sample across all methods against ground truth.
-    
+
     Args:
         sample_id (str): Sample identifier
         file_matches (Dict[str, str]): Mapping of method names to file paths
         metric_names (List[str], optional): Specific metrics to calculate
         verbose (bool): Print detailed progress
-    
+        target_method (str, optional): Only evaluate this method (skip others)
+
     Returns:
         Dict with results for each method
     """
     if 'ground_truth' not in file_matches:
         return {'sample_id': sample_id, 'error': 'No ground truth file found'}
-    
+
     try:
         # Load ground truth
         gt_events = load_events(file_matches['ground_truth'])
-        
+
         if verbose:
             print(f"    GT events: {len(gt_events):,}")
-        
+
         results = {'sample_id': sample_id}
-        
+
         # Evaluate each method against ground truth
         for method_name, method_file in file_matches.items():
             if method_name == 'ground_truth':
                 continue  # Skip ground truth itself
+
+            # If target_method specified, skip other methods
+            if target_method is not None and method_name != target_method:
+                continue
             
             try:
                 # Load method results
@@ -239,7 +245,8 @@ def run_multi_method_evaluation(simu_dir: str = "Datasets/simu",
                                max_samples: int = None,
                                metric_names: List[str] = None,
                                verbose: bool = True,
-                               checkpoint_file: str = None) -> pd.DataFrame:
+                               checkpoint_file: str = None,
+                               target_method: str = None) -> pd.DataFrame:
     """Run evaluation across all methods with checkpoint support.
 
     Args:
@@ -248,6 +255,7 @@ def run_multi_method_evaluation(simu_dir: str = "Datasets/simu",
         metric_names: List of specific metrics to calculate
         verbose: Print progress information
         checkpoint_file: Path to checkpoint file (enables resume capability)
+        target_method: If specified, only evaluate this method (default: all methods)
     """
 
     if verbose:
@@ -266,9 +274,15 @@ def run_multi_method_evaluation(simu_dir: str = "Datasets/simu",
 
     if verbose:
         print(f"Ground truth: {Path(gt_folder).name}")
-        print(f"Methods found: {len(method_names)}")
-        for name in method_names:
-            print(f"  - {name}")
+        if target_method:
+            if target_method in method_names:
+                print(f"Target method: {target_method} (only this method will be evaluated)")
+            else:
+                raise ValueError(f"Method '{target_method}' not found. Available: {', '.join(method_names)}")
+        else:
+            print(f"Methods found: {len(method_names)}")
+            for name in method_names:
+                print(f"  - {name}")
         print()
 
     # Get all sample IDs from ground truth folder
@@ -318,7 +332,7 @@ def run_multi_method_evaluation(simu_dir: str = "Datasets/simu",
             print(f"    Found files: {len(file_matches)-1} methods + GT")
 
         # Evaluate this sample
-        sample_result = evaluate_sample_across_methods(sample_id, file_matches, metric_names, verbose)
+        sample_result = evaluate_sample_across_methods(sample_id, file_matches, metric_names, verbose, target_method)
         results.append(sample_result)
 
         # Save checkpoint incrementally
@@ -462,6 +476,9 @@ def main():
     parser.add_argument('--quiet', '-q', action='store_true',
                        help='Reduce verbosity')
 
+    parser.add_argument('--method', type=str,
+                       help='Only evaluate this specific method (e.g., inputefr). Default: all methods')
+
     # Kernel configuration arguments
     parser.add_argument('--kernel-sampling', type=str, choices=['on', 'off'], default='off',
                        help='Enable/disable kernel sampling (default: off - fine cubes don\'t need sampling)')
@@ -498,7 +515,8 @@ def main():
             max_samples=args.num_samples,
             metric_names=args.metrics,
             verbose=not args.quiet,
-            checkpoint_file=str(checkpoint_path)
+            checkpoint_file=str(checkpoint_path),
+            target_method=args.method
         )
         
         save_results(results_df, args.output, not args.quiet)
