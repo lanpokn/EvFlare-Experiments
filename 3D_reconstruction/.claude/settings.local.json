@@ -34,7 +34,10 @@
       "Bash(else)",
       "Bash(fi)",
       "Bash(conda run:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(tree:*)",
+      "Read(//mnt/e/2025/event_flick_flare/EVREAL-main/EVREAL-main/**)",
+      "Read(//mnt/e/BaiduSyncdisk/2025/event_flick_flare/Unet_main/DSEC_data/**)"
     ],
     "deny": []
   }
