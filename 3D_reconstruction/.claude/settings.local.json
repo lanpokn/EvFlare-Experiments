@@ -37,7 +37,10 @@
       "Bash(chmod:*)",
       "Bash(tree:*)",
       "Read(//mnt/e/2025/event_flick_flare/EVREAL-main/EVREAL-main/**)",
-      "Read(//mnt/e/BaiduSyncdisk/2025/event_flick_flare/Unet_main/DSEC_data/**)"
+      "Read(//mnt/e/BaiduSyncdisk/2025/event_flick_flare/Unet_main/DSEC_data/**)",
+      "Read(//mnt/e/BaiduSyncdisk/2025/event_flick_flare/Unet_main/checkpoints/event_voxel_deflare_physics_noRandom_noTen_method/**)",
+      "Read(//mnt/e/BaiduSyncdisk/2025/event_flick_flare/Unet_main/ext/**)",
+      "Read(//mnt/e/BaiduSyncdisk/2025/event_flick_flare/Unet_main/**)"
     ],
     "deny": []
   }

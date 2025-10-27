@@ -1,8 +1,8 @@
 {
-  "num_events": 957457,
+  "num_events": 650682,
   "time_range_us": [
-    7600010.0,
-    7700000.0
+    0.0,
+    99999.0
   ],
   "spatial_range": {
     "x_range": [
@@ -15,7 +15,7 @@
     ]
   },
   "num_images": 40,
-  "source_file": "/mnt/e/BaiduSyncdisk/2025/event_flick_flare/Unet_main/DSEC_data/inputpfda/real_flare_zurich_city_03_a_t7600ms_20251022_004600.h5",
+  "source_file": "/mnt/e/BaiduSyncdisk/2025/event_flick_flare/Unet_main/DSEC_data/outputbaseline/real_flare_zurich_city_09_c_t26000ms_20251022_032728.h5",
   "sensor_resolution": [
     480,
     640
